@@ -47,7 +47,7 @@ const getCTALabel = (ctaValue?: string | null, language?: string): string | null
     },
   };
 
-  const lang = language === 'ckb' || language === 'ar' ? language : 'en';
+  const lang = language === 'ckb' || language === 'ar' ? language : 'ckb';
   const labels = ctaLabels[ctaValue];
   if (!labels) return null;
   return labels[lang] || labels.en;

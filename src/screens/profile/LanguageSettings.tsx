@@ -23,11 +23,10 @@ export function LanguageSettings() {
 
   const languages = [
     { code: 'ckb', name: 'Kurdish (Sorani)', nativeName: 'کوردی', countryCode: 'IQ' },
-    { code: 'en', name: 'English', nativeName: 'English', countryCode: 'US' },
     { code: 'ar', name: 'Arabic', nativeName: 'العربية', countryCode: 'IQ' },
   ];
 
-  const handleLanguageChange = async (lang: 'ckb' | 'en' | 'ar') => {
+  const handleLanguageChange = async (lang: 'ckb' | 'ar') => {
     await setLanguage(lang);
     toast.success('باشە', 'زمان نوێکرایەوە');
   };

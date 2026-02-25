@@ -10,7 +10,7 @@ import { useRemoteConfig } from '@/contexts/RemoteConfigContext';
 import { CustomTabBar } from '@/components/common/CustomTabBar';
 import { BlockedGuard } from '@/components/auth/BlockedGuard';
 // Using lucide-react-native icons
-import { Home, Megaphone, Plus, Link as LinkIcon, BookOpen } from 'lucide-react-native';
+import { Home, LayoutGrid, Plus, Link2, GraduationCap } from 'lucide-react-native';
 
 const Tab = createBottomTabNavigator();
 

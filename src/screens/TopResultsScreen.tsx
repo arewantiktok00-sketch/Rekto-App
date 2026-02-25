@@ -105,11 +105,11 @@ export const TopResultsScreen: React.FC = () => {
     }
     const [year, month] = monthKey.split('-');
     const date = new Date(parseInt(year, 10), parseInt(month, 10) - 1, 1);
-    const locale = language === 'ar' ? 'ar' : 'en';
+    const locale = language === 'ar' ? 'ar' : 'ckb';
     try {
       return date.toLocaleDateString(locale, { year: 'numeric', month: 'long' });
     } catch {
-      return date.toLocaleDateString('en', { year: 'numeric', month: 'long' });
+      return date.toLocaleDateString(locale === 'ar' ? 'ar-IQ' : 'ku', { year: 'numeric', month: 'long' });
     }
   };
 
@@ -130,10 +130,11 @@ export const TopResultsScreen: React.FC = () => {
   };
 
   const getRankColor = (rank: number) => {
-    if (rank === 1) return { bg: '#FACC15', text: '#111827' };
-    if (rank === 2) return { bg: '#D1D5DB', text: '#111827' };
-    if (rank === 3) return { bg: '#D97706', text: '#111827' };
-    return { bg: '#F3F4F6', text: '#111827' };
+    const text = colors.foreground.DEFAULT;
+    if (rank === 1) return { bg: colors.warning, text };
+    if (rank === 2) return { bg: colors.background.secondary, text };
+    if (rank === 3) return { bg: colors.warning, text };
+    return { bg: colors.background.secondary, text };
   };
 
   const getObjectiveLabel = (objective?: string | null) => {
@@ -228,7 +229,7 @@ export const TopResultsScreen: React.FC = () => {
                       style={[
                         styles.thumbnail,
                         styles.thumbnailPlaceholder,
-                        { backgroundColor: '#E5E7EB', alignItems: 'center', justifyContent: 'center' },
+                        { alignItems: 'center', justifyContent: 'center' },
                       ]}
                     >
                       <Trophy size={20} color="#9CA3AF" />
@@ -359,9 +360,9 @@ const createStyles = (colors: any, rtl: boolean, language: 'ckb' | 'ar') => {
     container: { flex: 1, backgroundColor: colors.background.DEFAULT },
     header: {
       flexDirection: 'row',
-      backgroundColor: '#FFFFFF',
+      backgroundColor: colors.card.background,
       borderBottomWidth: 1,
-      borderBottomColor: '#F1F5F9',
+      borderBottomColor: colors.border.DEFAULT,
       paddingStart: 16,
       paddingEnd: 16,
       paddingBottom: 12,
@@ -377,7 +378,7 @@ const createStyles = (colors: any, rtl: boolean, language: 'ckb' | 'ar') => {
       height: 40,
       borderRadius: 12,
       borderWidth: 1.5,
-      borderColor: '#E5E5E5',
+      borderColor: colors.border.DEFAULT,
       alignItems: 'center',
       justifyContent: 'center',
     },
@@ -390,7 +391,7 @@ const createStyles = (colors: any, rtl: boolean, language: 'ckb' | 'ar') => {
       fontSize: 18,
       fontWeight: '600',
       textAlign: 'center',
-      color: '#18181B',
+      color: colors.foreground.DEFAULT,
     },
     headerSpacer: { width: 40 },
     scroll: { flex: 1 },
@@ -436,7 +437,7 @@ const createStyles = (colors: any, rtl: boolean, language: 'ckb' | 'ar') => {
       position: 'absolute',
       top: -8,
       end: -8,
-      backgroundColor: '#FACC15',
+      backgroundColor: colors.warning,
       paddingHorizontal: 8,
       paddingVertical: 4,
       borderRadius: 12,
@@ -451,7 +452,7 @@ const createStyles = (colors: any, rtl: boolean, language: 'ckb' | 'ar') => {
       marginBottom: 12,
       paddingVertical: 10,
       borderWidth: 1.5,
-      borderColor: '#7C3AED',
+      borderColor: colors.primary.DEFAULT,
       borderRadius: 12,
       flexDirection: 'row',
       justifyContent: 'center',
@@ -459,13 +460,13 @@ const createStyles = (colors: any, rtl: boolean, language: 'ckb' | 'ar') => {
       gap: 8,
     },
     viewVideoButtonDisabled: {
-      borderColor: '#E5E7EB',
+      borderColor: colors.border.DEFAULT,
     },
-    viewVideoText: { color: '#7C3AED', fontSize: 13, fontFamily: fontSemiBold },
-    viewVideoTextDisabled: { color: '#9CA3AF' },
+    viewVideoText: { color: colors.primary.DEFAULT, fontSize: 13, fontFamily: fontSemiBold },
+    viewVideoTextDisabled: { color: colors.foreground.muted },
     moreInfoRow: {
       borderTopWidth: 1,
-      borderTopColor: '#E5E7EB',
+      borderTopColor: colors.border.DEFAULT,
       paddingStart: 16,
       paddingEnd: 16,
       paddingVertical: 12,
@@ -473,19 +474,19 @@ const createStyles = (colors: any, rtl: boolean, language: 'ckb' | 'ar') => {
       justifyContent: 'space-between',
       alignItems: 'center',
     },
-    moreInfoText: { color: '#7C3AED', fontFamily: fontMedium },
+    moreInfoText: { color: colors.primary.DEFAULT, fontFamily: fontMedium },
     moreInfoContent: { paddingStart: 16, paddingEnd: 16, paddingBottom: 16, flexDirection: 'row', gap: 12 },
-    infoBox: { flex: 1, backgroundColor: '#F3F4F6', borderRadius: 8, padding: 12 },
-    infoLabel: { fontSize: 12, color: '#6B7280', fontFamily: fontRegular },
-    infoValue: { color: '#111827', fontFamily: fontMedium },
-    infoValueNumber: { color: '#111827', fontFamily: numberBold },
+    infoBox: { flex: 1, backgroundColor: colors.background.secondary, borderRadius: 8, padding: 12 },
+    infoLabel: { fontSize: 12, color: colors.foreground.muted, fontFamily: fontRegular },
+    infoValue: { color: colors.foreground.DEFAULT, fontFamily: fontMedium },
+    infoValueNumber: { color: colors.foreground.DEFAULT, fontFamily: numberBold },
     numberLTR: {
       writingDirection: 'ltr',
       textAlign: 'left',
       fontFamily: 'Poppins-Bold',
     },
     emptyState: { alignItems: 'center', paddingVertical: 64 },
-    emptyText: { marginTop: 16, fontSize: 16, color: '#6B7280', fontFamily: fontMedium },
+    emptyText: { marginTop: 16, fontSize: 16, color: colors.foreground.muted, fontFamily: fontMedium },
   });
 };
 

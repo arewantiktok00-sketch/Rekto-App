@@ -7,7 +7,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Trophy } from 'lucide-react-native';
 import React, { useCallback, useEffect, useState } from 'react';
-import { Image, Linking, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Image } from 'expo-image';
+import { Linking, StyleSheet, TouchableOpacity, View } from 'react-native';
 
 interface FeaturedCampaign {
   id: string;
@@ -69,6 +70,7 @@ export const FeaturedSuccessStory: React.FC = () => {
   const [campaign, setCampaign] = useState<FeaturedCampaign | null>(null);
   const [loading, setLoading] = useState(true);
   const [isEnabled, setIsEnabled] = useState(true);
+  const [thumbnailLoadError, setThumbnailLoadError] = useState(false);
 
   const t = translations[language as keyof typeof translations] || translations.en;
   const isRTL = language === 'ckb' || language === 'ar';
@@ -184,11 +186,13 @@ export const FeaturedSuccessStory: React.FC = () => {
   }, [fetchFeatured, fetchGlobalSettings]);
 
   useEffect(() => {
-    console.log('[FeaturedSuccessStory] State:', {
-      isEnabled,
-      loading,
-      hasCampaign: !!campaign,
-    });
+    setThumbnailLoadError(false);
+  }, [campaign?.id]);
+
+  useEffect(() => {
+    if (__DEV__) {
+      console.log('[FeaturedSuccessStory] State:', { isEnabled, loading, hasCampaign: !!campaign });
+    }
   }, [isEnabled, loading, campaign]);
 
   useFocusEffect(
@@ -210,6 +214,7 @@ export const FeaturedSuccessStory: React.FC = () => {
 
   const thumbnailUrl = campaign.thumbnail_url || null;
   const isThumbnailValid = isValidThumbnail(thumbnailUrl);
+  const showThumbnail = isThumbnailValid && !thumbnailLoadError;
 
   return (
     <View style={styles.container}>
@@ -240,8 +245,8 @@ export const FeaturedSuccessStory: React.FC = () => {
             style={styles.thumbnailContainer}
             activeOpacity={0.8}
           >
-            {isThumbnailValid ? (
-              <Image source={{ uri: thumbnailUrl }} style={styles.thumbnail} />
+            {showThumbnail && thumbnailUrl ? (
+              <Image source={{ uri: thumbnailUrl }} style={styles.thumbnail} contentFit="cover" onError={() => setThumbnailLoadError(true)} />
             ) : (
               <View
                 style={[

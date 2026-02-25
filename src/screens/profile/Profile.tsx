@@ -709,7 +709,7 @@ const createStyles = (colors: any, typography: any, fontFamily: string, isRTL: b
   comingSoonCard: {
     width: '100%',
     maxWidth: 360,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.card.background,
     borderRadius: 16,
     overflow: 'hidden',
     shadowColor: '#000',
@@ -719,7 +719,7 @@ const createStyles = (colors: any, typography: any, fontFamily: string, isRTL: b
     elevation: 8,
   },
   comingSoonHeader: {
-    backgroundColor: '#EF4444',
+    backgroundColor: colors.error,
     paddingVertical: spacing.md,
     alignItems: 'center',
     gap: spacing.xs,
@@ -746,7 +746,7 @@ const createStyles = (colors: any, typography: any, fontFamily: string, isRTL: b
   },
   comingSoonText: {
     fontSize: 14,
-    color: '#111827',
+    color: colors.foreground.DEFAULT,
     textAlign: 'center',
     lineHeight: 20,
     writingDirection: 'rtl',
@@ -756,11 +756,11 @@ const createStyles = (colors: any, typography: any, fontFamily: string, isRTL: b
     marginBottom: spacing.lg,
     paddingVertical: spacing.sm,
     borderRadius: 999,
-    backgroundColor: '#EF4444',
+    backgroundColor: colors.error,
     alignItems: 'center',
   },
   comingSoonButtonText: {
-    color: '#FFFFFF',
+    color: colors.primary.foreground,
     fontWeight: '700',
     fontSize: 14,
     textAlign: 'left',

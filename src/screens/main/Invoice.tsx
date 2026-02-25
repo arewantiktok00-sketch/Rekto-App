@@ -532,7 +532,7 @@ const createStyles = (colors: any, insets: any, isRTL: boolean) => StyleSheet.cr
   },
   backButtonLabel: {
     fontSize: 16,
-    color: '#0A0A0F',
+    color: colors.foreground.DEFAULT,
     fontWeight: '500',
   },
   headerSpacer: {
@@ -541,13 +541,13 @@ const createStyles = (colors: any, insets: any, isRTL: boolean) => StyleSheet.cr
   },
   backButtonText: {
     fontSize: 16,
-    color: '#0A0A0F',
+    color: colors.foreground.DEFAULT,
     fontWeight: '500',
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#0A0A0F',
+    color: colors.foreground.DEFAULT,
     flex: 1,
     textAlign: 'center',
   },
@@ -561,17 +561,17 @@ const createStyles = (colors: any, insets: any, isRTL: boolean) => StyleSheet.cr
   },
   exportText: {
     fontSize: 12,
-    color: '#0A0A0F',
+    color: colors.foreground.DEFAULT,
   },
   scrollContent: {
     flex: 1,
   },
   invoiceCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.card.background,
     borderRadius: 20,
     margin: spacing.md,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border.DEFAULT,
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -592,17 +592,17 @@ const createStyles = (colors: any, insets: any, isRTL: boolean) => StyleSheet.cr
   logoText: {
     fontSize: 32,
     fontWeight: '700',
-    color: '#7C3AED',
+    color: colors.primary.DEFAULT,
     marginBottom: spacing.sm,
   },
   logoSubtitle: {
     fontSize: 12,
-    color: '#71717A',
+    color: colors.foreground.muted,
     textAlign: 'center',
   },
   logoSubtitleBold: {
     fontWeight: '600',
-    color: '#7C3AED',
+    color: colors.primary.DEFAULT,
   },
   infoRow: {
     flexDirection: 'row',
@@ -617,19 +617,19 @@ const createStyles = (colors: any, insets: any, isRTL: boolean) => StyleSheet.cr
   },
   infoLabel: {
     fontSize: 14,
-    color: '#71717A',
+    color: colors.foreground.muted,
   },
   infoValue: {
-    color: '#7C3AED',
+    color: colors.primary.DEFAULT,
     fontWeight: '500',
   },
   infoValueBold: {
-    color: '#7C3AED',
+    color: colors.primary.DEFAULT,
     fontWeight: '700',
   },
   infoEmail: {
     fontSize: 12,
-    color: '#71717A',
+    color: colors.foreground.muted,
     marginTop: spacing.xs,
   },
   sectionRow: {
@@ -645,20 +645,20 @@ const createStyles = (colors: any, insets: any, isRTL: boolean) => StyleSheet.cr
   sectionHeaderText: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#0A0A0F',
+    color: colors.foreground.DEFAULT,
   },
   sectionHeaderTextBold: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#0A0A0F',
+    color: colors.foreground.DEFAULT,
   },
   sectionHeaderTextRTL: {
     fontSize: 14,
-    color: '#71717A',
+    color: colors.foreground.muted,
   },
   sectionValue: {
     fontSize: 14,
-    color: '#0A0A0F',
+    color: colors.foreground.DEFAULT,
     fontFamily: 'monospace',
   },
   dividerContainer: {
@@ -667,7 +667,7 @@ const createStyles = (colors: any, insets: any, isRTL: boolean) => StyleSheet.cr
   },
   dividerLine: {
     height: 4,
-    backgroundColor: '#7C3AED',
+    backgroundColor: colors.primary.DEFAULT,
   },
   dividerArrow: {
     position: 'absolute',
@@ -681,7 +681,7 @@ const createStyles = (colors: any, insets: any, isRTL: boolean) => StyleSheet.cr
     borderTopWidth: 10,
     borderStartColor: 'transparent',
     borderEndColor: 'transparent',
-    borderTopColor: '#7C3AED',
+    borderTopColor: colors.primary.DEFAULT,
   },
   summarySection: {
     paddingHorizontal: spacing.lg,
@@ -690,7 +690,7 @@ const createStyles = (colors: any, insets: any, isRTL: boolean) => StyleSheet.cr
   summaryTitle: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#7C3AED',
+    color: colors.primary.DEFAULT,
     textAlign: 'right',
     marginBottom: spacing.md,
   },
@@ -705,19 +705,19 @@ const createStyles = (colors: any, insets: any, isRTL: boolean) => StyleSheet.cr
   },
   summaryItemLabel: {
     fontSize: 14,
-    color: '#0A0A0F',
+    color: colors.foreground.DEFAULT,
   },
   summaryItemLabelRTL: {
     fontSize: 14,
-    color: '#71717A',
+    color: colors.foreground.muted,
   },
   summaryItemValue: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#0A0A0F',
+    color: colors.foreground.DEFAULT,
   },
   summaryItemValuePaid: {
-    color: '#22C55E',
+    color: colors.success,
   },
   paymentSection: {
     paddingHorizontal: spacing.lg,
@@ -727,7 +727,7 @@ const createStyles = (colors: any, insets: any, isRTL: boolean) => StyleSheet.cr
   paymentTitle: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#7C3AED',
+    color: colors.primary.DEFAULT,
     textAlign: 'right',
     marginBottom: spacing.md,
   },
@@ -742,15 +742,15 @@ const createStyles = (colors: any, insets: any, isRTL: boolean) => StyleSheet.cr
   },
   paymentItemLabel: {
     fontSize: 14,
-    color: '#0A0A0F',
+    color: colors.foreground.DEFAULT,
   },
   paymentItemLabelRTL: {
     fontSize: 14,
-    color: '#71717A',
+    color: colors.foreground.muted,
   },
   paymentItemValue: {
     fontSize: 14,
-    color: '#0A0A0F',
+    color: colors.foreground.DEFAULT,
     fontFamily: 'monospace',
   },
   adNameSection: {
@@ -768,19 +768,19 @@ const createStyles = (colors: any, insets: any, isRTL: boolean) => StyleSheet.cr
   adNameLabel: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#7C3AED',
+    color: colors.primary.DEFAULT,
   },
   adNameLabelRTL: {
     fontSize: 14,
-    color: '#71717A',
+    color: colors.foreground.muted,
   },
   adNameValue: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#7C3AED',
+    color: colors.primary.DEFAULT,
   },
   footer: {
-    backgroundColor: '#F9FAFB',
+    backgroundColor: colors.background.secondary,
     padding: spacing.md,
     borderTopWidth: 1,
     borderTopColor: colors.border.DEFAULT,
@@ -788,6 +788,6 @@ const createStyles = (colors: any, insets: any, isRTL: boolean) => StyleSheet.cr
   },
   footerText: {
     fontSize: 12,
-    color: '#71717A',
+    color: colors.foreground.muted,
   },
 });

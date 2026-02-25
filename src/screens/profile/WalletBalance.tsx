@@ -364,7 +364,7 @@ const createStyles = (colors: any, insets: any, typography: any, rtl?: boolean) 
   comingSoonCard: {
     width: '100%',
     maxWidth: 360,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.card.background,
     borderRadius: 16,
     overflow: 'hidden',
     shadowColor: '#000',
@@ -374,7 +374,7 @@ const createStyles = (colors: any, insets: any, typography: any, rtl?: boolean) 
     elevation: 8,
   },
   comingSoonHeader: {
-    backgroundColor: '#EF4444',
+    backgroundColor: colors.error,
     paddingVertical: spacing.md,
     alignItems: 'center',
     gap: spacing.xs,
@@ -390,7 +390,7 @@ const createStyles = (colors: any, insets: any, typography: any, rtl?: boolean) 
   comingSoonTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#FFFFFF',
+    color: colors.primary.foreground,
   },
   comingSoonBody: {
     paddingStart: spacing.lg,
@@ -400,7 +400,7 @@ const createStyles = (colors: any, insets: any, typography: any, rtl?: boolean) 
   },
   comingSoonText: {
     fontSize: 14,
-    color: '#111827',
+    color: colors.foreground.DEFAULT,
     textAlign: 'center',
     lineHeight: 20,
   },
@@ -409,11 +409,11 @@ const createStyles = (colors: any, insets: any, typography: any, rtl?: boolean) 
     marginBottom: spacing.lg,
     paddingVertical: spacing.sm,
     borderRadius: 999,
-    backgroundColor: '#EF4444',
+    backgroundColor: colors.error,
     alignItems: 'center',
   },
   comingSoonButtonText: {
-    color: '#FFFFFF',
+    color: colors.primary.foreground,
     fontWeight: '700',
     fontSize: 14,
   },

@@ -3,7 +3,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { supabase, supabaseRead } from '@/integrations/supabase/client';
 import { getOwnerColors } from '@/theme/colors';
 import { spacing } from '@/theme/spacing';
-import { getFontFamily } from '@/utils/fonts';
+import { getFontFamilyByLanguage } from '@/utils/fonts';
 import { inputStyleRTL } from '@/utils/rtl';
 import { FileText, Save, Tag, Type } from 'lucide-react-native';
 import React, { useEffect, useState } from 'react';
@@ -21,7 +21,6 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const LANGUAGES = [
-  { code: 'en', label: 'English' },
   { code: 'ckb', label: 'Kurdish' },
   { code: 'ar', label: 'Arabic' },
 ];
@@ -42,7 +41,7 @@ export const BannerContentManager: React.FC = () => {
   const insets = useSafeAreaInsets();
   const colors = getOwnerColors();
   const { language } = useLanguage();
-  const fontFamily = getFontFamily(language || 'en');
+  const fontFamily = getFontFamilyByLanguage(language || 'ckb');
   const styles = createStyles(colors, insets, fontFamily);
   const navigation = require('@react-navigation/native').useNavigation();
 

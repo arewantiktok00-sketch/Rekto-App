@@ -5,6 +5,7 @@ import { getOwnerColors } from '@/theme/colors';
 import { borderRadius, spacing } from '@/theme/spacing';
 import { inputStyleRTL } from '@/utils/rtl';
 import { toast } from '@/utils/toast';
+import { Image } from 'expo-image';
 import { Video } from 'expo-av';
 import {
     AlertCircle,
@@ -28,7 +29,6 @@ import {
     Alert,
     Clipboard,
     FlatList,
-    Image,
     KeyboardAvoidingView,
     Linking,
     Modal,
@@ -573,7 +573,7 @@ export const AdReviewQueue: React.FC = () => {
                     isLooping
                   />
                 ) : videoInfo?.coverImageUrl ? (
-                  <Image source={{ uri: videoInfo.coverImageUrl }} style={styles.videoPreview} resizeMode="cover" />
+                  <Image source={{ uri: videoInfo.coverImageUrl }} style={styles.videoPreview} contentFit="cover" />
                 ) : (
                   <View style={styles.videoPlaceholder}>
                     <Play size={28} color="#7C3AED" />

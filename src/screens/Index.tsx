@@ -42,19 +42,6 @@ export function Index() {
       continueButton: 'بەردەوام بە',
       chooseLanguage: 'زمانەکەت هەڵبژێرە',
     },
-    en: {
-      headline: 'Ads that work.',
-      subheadline: 'Trusted by marketers who want results, not complexity.',
-      bubbles: [
-        { icon: 'flame', text: '+320% ROI', color: '#F97316' },
-        { icon: 'heart', text: 'Advertisers love Rekto', color: '#EC4899' },
-        { icon: 'zap', text: 'Ads in minutes', color: '#8B5CF6' },
-        { icon: 'check-circle', text: 'No ad manager needed', color: '#22C55E' },
-      ],
-      tagline: '"Your success story starts here."',
-      continueButton: 'Continue',
-      chooseLanguage: 'Choose your language',
-    },
     ar: {
       headline: 'إعلانات تحقق نتائج.',
       subheadline: 'موثوق من المسوقين الذين يريدون نتائج، وليس تعقيداً.',
@@ -70,7 +57,7 @@ export function Index() {
     },
   }), []);
 
-  const localized = content[language as keyof typeof content] || content.en;
+  const localized = content[language as keyof typeof content] || content.ckb;
   const bubbleIcons = {
     'flame': Flame,
     'heart': Heart,
@@ -156,9 +143,9 @@ export function Index() {
           {localized.chooseLanguage}
         </Text>
         <View style={styles.languageSelector} pointerEvents="box-none">
-          {(['ckb', 'en', 'ar'] as const).map((lang) => {
+          {(['ckb', 'ar'] as const).map((lang) => {
             const isActive = language === lang;
-            const label = lang === 'ckb' ? 'کوردی' : lang === 'en' ? 'English' : 'العربية';
+            const label = lang === 'ckb' ? 'کوردی' : 'العربية';
             return (
               <TouchableOpacity
                 key={lang}

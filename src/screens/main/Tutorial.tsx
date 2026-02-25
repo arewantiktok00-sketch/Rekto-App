@@ -23,8 +23,6 @@ import { Text } from '@/components/common/Text';
 
 const REKTO_PURPLE_START = '#7B5CFF';
 const REKTO_PURPLE_END = '#5E3BEE';
-const SCREEN_BG = '#F7F7FA';
-const CARD_DESC_COLOR = '#777';
 
 interface Tutorial {
   id: string;
@@ -202,7 +200,7 @@ export function Tutorial() {
   const { t, language, isRTL } = useLanguage();
   const { colors } = useTheme();
   const typography = getTypographyStyles(language as 'ckb' | 'ar');
-  const styles = createStyles(insets, typography, isRTL);
+  const styles = createStyles(colors, insets, typography, isRTL);
   const [tutorials, setTutorials] = useState<Tutorial[]>([]);
 
   const fetchTutorials = useCallback(async () => {
@@ -333,11 +331,11 @@ export function Tutorial() {
   );
 }
 
-const createStyles = (insets: any, typography: any, isRTL?: boolean) =>
+const createStyles = (colors: any, insets: any, typography: any, isRTL?: boolean) =>
   StyleSheet.create({
     container: {
       flex: 1,
-      backgroundColor: SCREEN_BG,
+      backgroundColor: colors.background.DEFAULT,
     },
     textRTL: {
       textAlign: 'right',
@@ -349,7 +347,7 @@ const createStyles = (insets: any, typography: any, isRTL?: boolean) =>
       paddingBottom: Math.max(40, insets.bottom + 100),
     },
     card: {
-      backgroundColor: '#FFFFFF',
+      backgroundColor: colors.card.background,
       borderRadius: 22,
       marginBottom: spacing.lg,
       overflow: 'hidden',
@@ -377,7 +375,7 @@ const createStyles = (insets: any, typography: any, isRTL?: boolean) =>
     thumbnailPlaceholder: {
       width: '100%',
       height: '100%',
-      backgroundColor: '#E5E7EB',
+      backgroundColor: colors.background.secondary,
       borderTopLeftRadius: 18,
       borderTopRightRadius: 18,
     },
@@ -400,11 +398,11 @@ const createStyles = (insets: any, typography: any, isRTL?: boolean) =>
       fontWeight: '700',
       marginTop: 14,
       paddingHorizontal: spacing.md,
-      color: '#1F2937',
+      color: colors.foreground.DEFAULT,
     },
     cardDescription: {
       fontSize: 14,
-      color: CARD_DESC_COLOR,
+      color: colors.foreground.muted,
       marginTop: 6,
       paddingHorizontal: spacing.md,
       lineHeight: 20,
@@ -420,7 +418,7 @@ const createStyles = (insets: any, typography: any, isRTL?: boolean) =>
     },
     watchButtonText: {
       ...typography.label,
-      color: '#FFFFFF',
+      color: colors.primary.foreground,
       fontSize: 16,
       fontWeight: '600',
     },
@@ -433,14 +431,14 @@ const createStyles = (insets: any, typography: any, isRTL?: boolean) =>
     emptyTitle: {
       ...typography.h2,
       fontSize: 20,
-      color: '#374151',
+      color: colors.foreground.DEFAULT,
       marginTop: spacing.md,
       marginBottom: spacing.sm,
     },
     emptySubtitle: {
       ...typography.bodySmall,
       fontSize: 14,
-      color: '#6B7280',
+      color: colors.foreground.muted,
       textAlign: 'center',
     },
   });

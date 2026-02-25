@@ -140,12 +140,14 @@ export function AnimatedSplash({ onFinish, onReady }: AnimatedSplashProps) {
     return lottieSource;
   };
 
+  // Match app dark default (design token #0F0F14)
+  const splashBg = '#0F0F14';
   return (
     <>
-      <StatusBar barStyle="dark-content" backgroundColor="#EFEFEF" translucent={false} />
-      <View style={[styles.root, { backgroundColor: '#EFEFEF' }]}>
+      <StatusBar barStyle="light-content" backgroundColor={splashBg} translucent={false} />
+      <View style={[styles.root, { backgroundColor: splashBg }]}>
       {/* Full background - fills entire screen */}
-      <View style={[styles.background, { backgroundColor: '#EFEFEF' }]} />
+      <View style={[styles.background, { backgroundColor: splashBg }]} />
 
       {/* Lottie Animation - Web Platform */}
       {Platform.OS === 'web' && DotLottieReact && (
@@ -194,7 +196,7 @@ const styles = StyleSheet.create({
     flex: 1,
     width: SCREEN_WIDTH,
     height: SCREEN_HEIGHT,
-    backgroundColor: '#EFEFEF',
+    backgroundColor: '#0F0F14',
     position: 'absolute',
     top: 0,
     start: 0,
@@ -203,7 +205,7 @@ const styles = StyleSheet.create({
   },
   background: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#EFEFEF',
+    backgroundColor: '#0F0F14',
   },
   lottieContainer: {
     ...StyleSheet.absoluteFillObject,

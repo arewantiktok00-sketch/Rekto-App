@@ -334,7 +334,7 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: '#EDE9FE',
+    backgroundColor: colors.background.secondary,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: spacing.sm,

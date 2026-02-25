@@ -178,10 +178,8 @@ export default function RootNavigator() {
       maintenanceMessage = config.maintenance.message_ckb;
     } else if (language === 'ar' && config.maintenance.message_ar) {
       maintenanceMessage = config.maintenance.message_ar;
-    } else if (config.maintenance.message_en) {
-      maintenanceMessage = config.maintenance.message_en;
     } else {
-      maintenanceMessage = config.maintenance.message || undefined;
+      maintenanceMessage = config.maintenance.message_ckb || config.maintenance.message_ar || config.maintenance.message || undefined;
     }
 
     return (

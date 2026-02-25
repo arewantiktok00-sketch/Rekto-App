@@ -2,7 +2,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BookOpen, Home, Link as LinkIcon, Megaphone, Plus } from 'lucide-react-native';
+import { GraduationCap, Home, LayoutGrid, Link2, Plus } from 'lucide-react-native';
 import React, { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -75,11 +75,11 @@ export function CustomTabBar({ state, descriptors, navigation }: BottomTabBarPro
   }
 
   const tabScreens = [
-    { name: 'Dashboard', icon: Home, labelKey: 'home', fallback: 'Home' },
-    { name: 'Campaigns', icon: Megaphone, labelKey: 'campaigns', fallback: 'Campaigns' },
-    { name: 'CreateAd', icon: Plus, labelKey: 'create', fallback: 'Create', isCenter: true },
-    { name: 'Links', icon: LinkIcon, labelKey: 'links', fallback: 'Links' },
-    { name: 'Tutorial', icon: BookOpen, labelKey: 'learn', fallback: 'Learn' },
+    { name: 'Dashboard', icon: Home, labelKey: 'home', fallback: 'سەرەکی' },
+    { name: 'Campaigns', icon: LayoutGrid, labelKey: 'campaigns', fallback: 'ڕیکلام' },
+    { name: 'CreateAd', icon: Plus, labelKey: 'create', fallback: 'دروستکردن', isCenter: true },
+    { name: 'Links', icon: Link2, labelKey: 'links', fallback: 'لینک' },
+    { name: 'Tutorial', icon: GraduationCap, labelKey: 'learn', fallback: 'فێربوون' },
   ];
 
   const styles = createStyles(colors, insets, fontFamily, isRTL);

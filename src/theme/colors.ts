@@ -93,9 +93,9 @@ export const colors = {
       foreground: '#FFFFFF',   // Text on primary buttons
     },
 
-    // Background Colors (Dark Theme)
+    // Background Colors (Dark Theme) - spec: #0F0F14 default
     background: {
-      DEFAULT: '#0F0F1A',      // Main app background
+      DEFAULT: '#0F0F14',      // Main app background (dark mode default)
       secondary: '#2A2A3E',    // Secondary surfaces
       tertiary: '#2A2A3E',     // Elevated surfaces
     },
@@ -114,8 +114,8 @@ export const colors = {
       focus: '#8B5CF6',        // Focus state border
     },
 
-    // Semantic Colors
-    success: '#22C55E',        // Green
+    // Semantic Colors - spec: Discount Green #10B981
+    success: '#10B981',        // Green (discount/success)
     warning: '#F59E0B',        // Orange/Amber
     error: '#EF4444',          // Red
     info: '#3B82F6',           // Blue
@@ -148,9 +148,9 @@ export const colors = {
       placeholder: '#A1A1AA',
     },
 
-    // Card Colors
+    // Card Colors - spec: rgba(255,255,255,0.05)
     card: {
-      background: '#1A1A2E',
+      background: 'rgba(255,255,255,0.05)',
       border: '#2A2A3E',
     },
 
@@ -162,9 +162,9 @@ export const colors = {
         start: { x: 0, y: 0 },
         end: { x: 1, y: 1 },
       },
-      // Primary button
+      // rekto-gradient: linear-gradient(135deg, #7C3AED, #9333EA)
       primaryButton: {
-        colors: ['#8B5CF6', '#7C3AED'],
+        colors: ['#7C3AED', '#9333EA'],
         start: { x: 0, y: 0 },
         end: { x: 1, y: 1 },
       },
@@ -213,3 +213,10 @@ export const foreground = colors.light.foreground.DEFAULT;
 export const muted = colors.light.foreground.muted;
 export const border = colors.light.border.DEFAULT;
 export const card = colors.light.card.background;
+
+/** Design token: rekto-gradient linear-gradient(135deg, #7C3AED, #9333EA) */
+export const rektoGradientColors = ['#7C3AED', '#9333EA'] as const;
+export const rektoGradient = { colors: rektoGradientColors, start: { x: 0, y: 0 }, end: { x: 1, y: 1 } };
+
+/** Design token: border radius for cards 16px */
+export const BORDER_RADIUS_CARDS = 16;

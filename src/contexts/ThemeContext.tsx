@@ -25,8 +25,8 @@ const ThemeContext = createContext<ThemeContextType>(defaultThemeContext);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const systemColorScheme = useColorScheme();
-  const [themeMode, setThemeModeState] = useState<ThemeMode>('light'); // Default to light theme
-  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [themeMode, setThemeModeState] = useState<ThemeMode>('dark'); // Default to dark (spec: #0F0F14)
+  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
 
   // Load saved theme preference
   useEffect(() => {
@@ -48,9 +48,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       if (saved && ['light', 'dark', 'system'].includes(saved)) {
         setThemeModeState(saved as ThemeMode);
       } else {
-        // If no theme saved, default to light
-        setThemeModeState('light');
-        await AsyncStorage.setItem('rekto-theme', 'light');
+        // If no theme saved, default to dark (spec)
+        setThemeModeState('dark');
+        await AsyncStorage.setItem('rekto-theme', 'dark');
       }
     } catch (error) {
       console.error('Error loading theme:', error);

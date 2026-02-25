@@ -6,11 +6,10 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import { initReactI18next } from 'react-i18next';
 import { I18nManager } from 'react-native';
 
-type Language = 'ckb' | 'en' | 'ar';
+type Language = 'ckb' | 'ar';
 
 import arTranslations from '@/locales/ar.json';
 import ckbTranslations from '@/locales/ckb.json';
-import enTranslations from '@/locales/en.json';
 
 interface LanguageContextType {
   language: Language;
@@ -27,11 +26,10 @@ i18n
   .init({
     resources: {
       ckb: { translation: ckbTranslations },
-      en: { translation: enTranslations },
       ar: { translation: arTranslations },
     },
-    lng: 'en',
-    fallbackLng: 'en',
+    lng: 'ckb',
+    fallbackLng: 'ckb',
     interpolation: {
       escapeValue: false,
     },
@@ -39,7 +37,7 @@ i18n
 
 export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
-  const [language, setLanguageState] = useState<Language>('en');
+  const [language, setLanguageState] = useState<Language>('ckb');
   const [isInitialized, setIsInitialized] = useState(false);
 
   const setLanguageInternal = useCallback(async (lang: Language, persistRemote: boolean) => {
@@ -74,9 +72,7 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const initLanguage = async () => {
       try {
         const saved = await AsyncStorage.getItem('rekto-language');
-        if (saved === 'en') {
-          await setLanguageInternal('en', false);
-        } else if (saved === 'ar') {
+        if (saved === 'ar') {
           await setLanguageInternal('ar', false);
         } else if (user?.id) {
           const { data, error } = await supabaseRead
@@ -87,13 +83,11 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const pref = data?.preferred_language;
           if (!error && pref === 'ar') {
             await setLanguageInternal('ar', false);
-          } else if (!error && pref === 'en') {
-            await setLanguageInternal('en', false);
           } else {
             await setLanguageInternal('ckb', false);
           }
         } else {
-          await setLanguageInternal('en', false);
+          await setLanguageInternal('ckb', false);
         }
       } catch (error) {
         console.error('Error reading language from AsyncStorage:', error);

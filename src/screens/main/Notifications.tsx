@@ -23,7 +23,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { getFontFamily } from '@/utils/getFontFamily';
 import { ScreenHeader } from '@/components/common/ScreenHeader';
 import { spacing, borderRadius } from '@/theme/spacing';
-import { format, formatDistanceToNow } from 'date-fns';
+import { format } from 'date-fns';
 import { NotificationDetailModal } from '@/components/common/NotificationDetailModal';
 import { ExpiredOfferModal } from '@/components/common/ExpiredOfferModal';
 import { Text } from '@/components/common/Text';
@@ -276,9 +276,6 @@ export function Notifications() {
   };
 
   const formatRelativeTime = (date: Date) => {
-    if (language === 'en') {
-      return formatDistanceToNow(date, { addSuffix: true });
-    }
     const diffMs = Date.now() - date.getTime();
     const minutes = Math.floor(diffMs / 60000);
     if (minutes < 1) {

@@ -184,7 +184,7 @@ export const HeroBanner: React.FC = () => {
     fallbackSlide: Slide,
     field: 'title' | 'subtitle' | 'tag'
   ): string => {
-    const lang = language || 'en';
+    const lang = language || 'ckb';
     const key = `${field}_${lang}` as keyof Slide;
     const fallbackKey = `${field}_en` as keyof Slide;
     const pick = (value: unknown) =>

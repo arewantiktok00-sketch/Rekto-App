@@ -195,12 +195,6 @@ function AppContent() {
   }, []);
 
   useEffect(() => {
-    console.log('Language:', language);
-    console.log('RTL boolean:', isRTL);
-    console.log('I18nManager.isRTL:', I18nManager.isRTL);
-  }, [language, isRTL]);
-
-  useEffect(() => {
     if (user?.id) {
       initializeOneSignal(user.id).catch((error) => {
         console.log('OneSignal initialization failed:', error);
