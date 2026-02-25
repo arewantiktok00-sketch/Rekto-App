@@ -16,6 +16,13 @@
       "output": "static",
       "favicon": "./assets/images/favicon.png"
     },
+    "fonts": [
+      "src/assets/fonts/Rabar_021.ttf",
+      "src/assets/fonts/Poppins-Regular.ttf",
+      "src/assets/fonts/Poppins-Medium.ttf",
+      "src/assets/fonts/Poppins-SemiBold.ttf",
+      "src/assets/fonts/Poppins-Bold.ttf"
+    ],
     "plugins": [
       "expo-router",
       [

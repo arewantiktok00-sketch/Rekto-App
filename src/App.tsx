@@ -131,14 +131,13 @@ function AppContent() {
     const loadFonts = async () => {
       try {
         await Font.loadAsync({
-          // Kurdish/Arabic font - use PostScript name
-          // Path: src/App.tsx -> assets/fonts/ = ../assets/fonts/ (one level up from src)
-          'Rabar_021': require('../assets/fonts/Rabar_021.ttf'),
-          // English fonts (Poppins) - use PostScript names
-          'Poppins-Regular': require('../assets/fonts/Poppins-Regular.ttf'),
-          'Poppins-Medium': require('../assets/fonts/Poppins-Medium.ttf'),
-          'Poppins-SemiBold': require('../assets/fonts/Poppins-SemiBold.ttf'),
-          'Poppins-Bold': require('../assets/fonts/Poppins-Bold.ttf'),
+          // Kurdish/Arabic — Rabar_021 (RTL text)
+          'Rabar_021': require('./assets/fonts/Rabar_021.ttf'),
+          // English and numbers — Poppins
+          'Poppins-Regular': require('./assets/fonts/Poppins-Regular.ttf'),
+          'Poppins-Medium': require('./assets/fonts/Poppins-Medium.ttf'),
+          'Poppins-SemiBold': require('./assets/fonts/Poppins-SemiBold.ttf'),
+          'Poppins-Bold': require('./assets/fonts/Poppins-Bold.ttf'),
         });
         setFontsLoaded(true);
         setAppReady(true);

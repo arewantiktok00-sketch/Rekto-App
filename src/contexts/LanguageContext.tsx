@@ -1,15 +1,13 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase, supabaseRead } from '@/integrations/supabase/client';
+import { getTranslation, type LocaleKey } from '@/i18n/translations';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import i18n from 'i18next';
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { initReactI18next } from 'react-i18next';
 import { I18nManager } from 'react-native';
 
-type Language = 'ckb' | 'ar';
+export type Language = LocaleKey; // 'ckb' | 'ar' — NO ENGLISH
 
-import arTranslations from '@/locales/ar.json';
-import ckbTranslations from '@/locales/ckb.json';
+const STORAGE_KEY = 'rekto-language';
 
 interface LanguageContextType {
   language: Language;
@@ -20,31 +18,14 @@ interface LanguageContextType {
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
-// Initialize i18n
-i18n
-  .use(initReactI18next)
-  .init({
-    resources: {
-      ckb: { translation: ckbTranslations },
-      ar: { translation: arTranslations },
-    },
-    lng: 'ckb',
-    fallbackLng: 'ckb',
-    interpolation: {
-      escapeValue: false,
-    },
-  });
-
 export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
   const [language, setLanguageState] = useState<Language>('ckb');
-  const [isInitialized, setIsInitialized] = useState(false);
 
   const setLanguageInternal = useCallback(async (lang: Language, persistRemote: boolean) => {
     try {
-      await AsyncStorage.setItem('rekto-language', lang);
+      await AsyncStorage.setItem(STORAGE_KEY, lang);
       setLanguageState(lang);
-      await i18n.changeLanguage(lang);
       I18nManager.forceRTL(true);
       I18nManager.allowRTL(true);
 
@@ -62,7 +43,6 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, [user?.id]);
 
-  // Initialize language from AsyncStorage and profile
   useEffect(() => {
     I18nManager.forceRTL(true);
     I18nManager.allowRTL(true);
@@ -71,7 +51,7 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     const initLanguage = async () => {
       try {
-        const saved = await AsyncStorage.getItem('rekto-language');
+        const saved = await AsyncStorage.getItem(STORAGE_KEY);
         if (saved === 'ar') {
           await setLanguageInternal('ar', false);
         } else if (user?.id) {
@@ -92,19 +72,24 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       } catch (error) {
         console.error('Error reading language from AsyncStorage:', error);
       }
-      setIsInitialized(true);
     };
     initLanguage();
   }, [user?.id, setLanguageInternal]);
 
-  const isRTL = language === 'ckb' || language === 'ar';
+  const isRTL = true; // ALWAYS true — both ckb and ar are RTL
 
   const setLanguage = async (lang: Language) => {
     await setLanguageInternal(lang, true);
   };
 
   const t = (key: string, options?: Record<string, unknown>): string => {
-    return i18n.t(key, { lng: language, ...options });
+    let out = getTranslation(key, language);
+    if (options && typeof out === 'string') {
+      Object.keys(options).forEach((k) => {
+        out = out.replace(new RegExp(`\\{\\{${k}\\}\\}`, 'g'), String(options[k]));
+      });
+    }
+    return out;
   };
 
   return (
