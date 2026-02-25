@@ -1,0 +1,59 @@
+---
+description: Use this rule whenever implementing or touching RTL/LTR in the app.
+globs: ["**/*.tsx", "**/*.ts", "src/utils/rtl.ts"]
+---
+
+# RTL/LTR in the app — single source of truth
+
+## RTL/LTR rule for text
+
+**Kurdish (ckb) + Arabic (ar) → ALL text = RTL**
+- Labels, titles, hints, placeholders, button text.
+- Use `textAlign: 'right'`, `writingDirection: 'rtl'`, and RTL font.
+
+**English (en) → ALL text = LTR**
+- Labels, titles, hints, placeholders, button text.
+- Use `textAlign: 'left'`, `writingDirection: 'ltr'`, and English font.
+
+**Numbers/currency/dates → always LTR** in all languages.
+
+Example:
+```ts
+const isRTL = language === 'ckb' || language === 'ar';
+const textStyle = {
+  textAlign: isRTL ? 'right' : 'left',
+  writingDirection: isRTL ? 'rtl' : 'ltr',
+};
+const numberStyle = {
+  textAlign: 'left',
+  writingDirection: 'ltr',
+};
+```
+
+## 1) Detect RTL (single source of truth)
+Use one of these everywhere:
+- `const { language, isRTL } = useLanguage();` (preferred)
+- or `const isRTL = language === 'ckb' || language === 'ar';`
+
+Pass `isRTL` to styles: `createStyles(colors, isRTL, language)`.
+
+## 2) Required helpers (src/utils/rtl.ts)
+- **labelStyleRTL(isRTL)** — labels, titles, hints
+- **centerLabelStyleRTL(isRTL)** — centered button text
+- **inputStyleRTL(isRTL)** — all TextInputs
+- **ltrNumberStyle** — numbers, prices, dates (always LTR)
+- **iconTransformRTL(isRTL)** — chevrons/arrows flip in RTL
+
+## 3) Layout rules
+- Rows with icon + text → `flexDirection: isRTL ? 'row-reverse' : 'row'`
+- Header (back + title) → same row-reverse rule
+- Use logical spacing: `marginStart`, `marginEnd`, `paddingStart`, `paddingEnd`
+
+## 4) Checklist for every screen
+- Labels/titles/hints → labelStyleRTL(isRTL)
+- Buttons text → centerLabelStyleRTL(isRTL)
+- TextInputs → inputStyleRTL(isRTL)
+- Numbers/currency/dates → ltrNumberStyle
+- Row layout flipped with row-reverse when RTL
+- Icons flipped with iconTransformRTL(isRTL)
+- Do not mix RTL/LTR inside one text block; force LTR for numeric/English content.
