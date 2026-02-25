@@ -4,9 +4,10 @@
  */
 
 import ckbTranslations from '@/locales/ckb.json';
+import enTranslations from '@/locales/en.json';
 import arTranslations from '@/locales/ar.json';
 
-export type Language = 'ckb' | 'ar';
+export type Language = 'ckb' | 'en' | 'ar';
 
 export interface Translations {
   tabs: {
@@ -53,6 +54,7 @@ export const getTranslations = (language: Language): Translations => {
   const fallback = ckbTranslations as any;
   const translations = {
     ckb: ckbTranslations,
+    en: enTranslations,
     ar: arTranslations,
   }[language];
 
@@ -98,5 +100,6 @@ export const getTranslations = (language: Language): Translations => {
  */
 export const translations = {
   ckb: getTranslations('ckb'),
+  en: getTranslations('en'),
   ar: getTranslations('ar'),
 };
