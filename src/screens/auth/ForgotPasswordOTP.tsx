@@ -9,15 +9,17 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { ArrowLeft, KeyRound } from 'lucide-react-native';
 import React, { useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const COOLDOWN_SECONDS = 120;
 
 export function ForgotPasswordOTP() {
   const navigation = useNavigation();
   const route = useRoute();
+  const insets = useSafeAreaInsets();
   const { t } = useLanguage();
   const { colors } = useTheme();
-  const styles = createStyles(colors);
+  const styles = createStyles(colors, insets);
   const email = (route.params as any)?.email as string;
 
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
@@ -97,23 +99,23 @@ export function ForgotPasswordOTP() {
         body: { email: email?.trim()?.toLowerCase() },
       });
       if (error) {
-        toast.warning('Please try again', 'Could not send code. Please try again in a moment.');
+        toast.warning(t('pleaseTryAgain'), t('couldNotSendCode'));
         return;
       }
       if (data?.error) {
         const msg = (data.error as string).toLowerCase();
         if (msg.includes('wait') || msg.includes('recent')) {
-          toast.warning('Please wait', 'Please wait 2 minutes before requesting a new code.');
+          toast.warning(t('pleaseWait'), t('pleaseWait2Minutes'));
           startCooldown();
         } else {
-          toast.error('Error', data.error as string);
+          toast.error(t('error'), t('somethingWentWrong'));
         }
         return;
       }
-      toast.success('Code sent', 'Verification code sent! Check your email.');
+      toast.success(t('codeSent'), t('checkYourEmailForCode'));
       startCooldown();
     } catch {
-      toast.error('Error', 'Could not send code. Please try again.');
+      toast.error(t('error'), t('couldNotSendCode'));
     }
   };
 
@@ -176,18 +178,19 @@ export function ForgotPasswordOTP() {
   );
 }
 
-const createStyles = (colors: any) =>
+const createStyles = (colors: any, insets: { top: number; bottom: number }) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background.DEFAULT },
     content: {
       flex: 1,
       paddingHorizontal: spacing.screenPadding,
-      paddingTop: spacing[8],
+      paddingTop: insets.top + spacing[6],
+      paddingBottom: insets.bottom + spacing[4],
     },
     backButton: {
       position: 'absolute',
       start: spacing[4],
-      top: spacing[6],
+      top: insets.top + spacing[2],
       zIndex: 10,
     },
     iconCircle: {

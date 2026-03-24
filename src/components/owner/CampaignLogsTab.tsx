@@ -3,7 +3,7 @@ import { View, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Refr
 import { FileText, Clock, User, CheckCircle, XCircle, RefreshCw, Building2, AlertCircle } from 'lucide-react-native';
 import { ownerApi } from '@/services/ownerApi';
 import { spacing, borderRadius } from '@/theme/spacing';
-import { format } from 'date-fns';
+import { formatDateTimeNumeric } from '@/utils/dateFormat';
 import { toast } from '@/utils/toast';
 import { Text } from '@/components/common/Text';
 
@@ -43,7 +43,7 @@ export const CampaignLogsTab: React.FC<CampaignLogsTabProps> = ({ colors, t }) =
       setLogs(data?.logs || []);
     } catch (err: any) {
       console.error('[CampaignLogs] Failed to fetch logs:', err);
-      toast.error('Error', 'Something went wrong');
+      toast.error(t('error'), t('somethingWentWrong'));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -159,15 +159,15 @@ export const CampaignLogsTab: React.FC<CampaignLogsTabProps> = ({ colors, t }) =
                   <Clock size={14} color={colors.foreground.muted} />
                   <Text style={styles.detailText}>
                     {log.created_at
-                      ? format(new Date(log.created_at), 'MMM dd, yyyy HH:mm')
-                      : 'N/A'}
+                      ? formatDateTimeNumeric(new Date(log.created_at))
+                      : t('na')}
                   </Text>
                 </View>
               </View>
 
               {log.details && Object.keys(log.details).length > 0 && (
                 <View style={styles.detailsBox}>
-                  <Text style={styles.detailsLabel}>Details:</Text>
+                  <Text style={styles.detailsLabel}>{t('details')}</Text>
                   <Text style={styles.detailsText} numberOfLines={3}>
                     {JSON.stringify(log.details, null, 2)}
                   </Text>

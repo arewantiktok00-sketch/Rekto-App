@@ -1,6 +1,7 @@
-import { SymbolView, SymbolViewProps, SymbolWeight } from 'expo-symbols';
-import { StyleProp, ViewStyle } from 'react-native';
+import React from 'react';
+import { View, StyleProp, ViewStyle } from 'react-native';
 
+/** Placeholder for SF Symbol (expo-symbols removed). Use lucide-react-native or react-native-vector-icons for icons. */
 export function IconSymbol({
   name,
   size = 24,
@@ -8,25 +9,11 @@ export function IconSymbol({
   style,
   weight = 'regular',
 }: {
-  name: SymbolViewProps['name'];
+  name: string;
   size?: number;
   color: string;
   style?: StyleProp<ViewStyle>;
-  weight?: SymbolWeight;
+  weight?: string;
 }) {
-  return (
-    <SymbolView
-      weight={weight}
-      tintColor={color}
-      resizeMode="scaleAspectFit"
-      name={name}
-      style={[
-        {
-          width: size,
-          height: size,
-        },
-        style,
-      ]}
-    />
-  );
+  return <View style={[{ width: size, height: size, backgroundColor: 'transparent' }, style]} />;
 }

@@ -3,11 +3,11 @@ import { TikTokIcon } from '@/components/icons/TikTokIcon';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { supabase } from '@/integrations/supabase/client';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Trophy } from 'lucide-react-native';
 import React, { useCallback, useEffect, useState } from 'react';
-import { Image } from 'expo-image';
+import { Image } from 'react-native';
 import { Linking, StyleSheet, TouchableOpacity, View } from 'react-native';
 
 interface FeaturedCampaign {
@@ -218,7 +218,7 @@ export const FeaturedSuccessStory: React.FC = () => {
 
   return (
     <View style={styles.container}>
-        <View style={[styles.header, isRTL && styles.rowReverse]}>
+        <View style={styles.header}>
           <View style={styles.headerIcon}>
             <Ionicons name="trophy" size={16} color="#7C3AED" />
           </View>
@@ -226,7 +226,7 @@ export const FeaturedSuccessStory: React.FC = () => {
           <Ionicons name="sparkles" size={16} color="#EAB308" />
         </View>
 
-        <View style={[styles.content, isRTL && styles.rowReverse]}>
+        <View style={styles.content}>
           <TouchableOpacity
             onPress={async () => {
               const publicUrl = (campaign as any).tiktok_public_url as string | null;
@@ -246,7 +246,7 @@ export const FeaturedSuccessStory: React.FC = () => {
             activeOpacity={0.8}
           >
             {showThumbnail && thumbnailUrl ? (
-              <Image source={{ uri: thumbnailUrl }} style={styles.thumbnail} contentFit="cover" onError={() => setThumbnailLoadError(true)} />
+              <Image source={{ uri: thumbnailUrl }} style={styles.thumbnail} resizeMode="cover" onError={() => setThumbnailLoadError(true)} />
             ) : (
               <View
                 style={[
@@ -274,7 +274,7 @@ export const FeaturedSuccessStory: React.FC = () => {
               {t.business}
             </Text>
 
-            <View style={[styles.metricsRow, isRTL && styles.rowReverse]}>
+            <View style={styles.metricsRow}>
               <View style={styles.metric}>
                 <Text style={[styles.metricLabel, isRTL && styles.rtlText]}>{t.spent}</Text>
                 <View style={styles.metricValue}>
@@ -324,7 +324,7 @@ export const FeaturedSuccessStory: React.FC = () => {
           </View>
         </View>
 
-        <View style={[styles.buttonsRow, isRTL && styles.rowReverse]}>
+        <View style={styles.buttonsRow}>
           {(isValidTikTokUrl((campaign as any).tiktok_public_url) || !!(campaign as any).video_url) ? (
             <TouchableOpacity
               style={styles.watchButton}
@@ -374,7 +374,6 @@ const createStyles = (colors: any) => StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.3)',
   },
-  rowReverse: { flexDirection: 'row' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

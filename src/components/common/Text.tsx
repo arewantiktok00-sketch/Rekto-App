@@ -59,14 +59,6 @@ export const Text: React.FC<TextProps> = ({
   const rtlWritingDirection = styleWritingDirection ?? (rtl ? 'rtl' : 'ltr');
   const safeFontFamily = fontFamily || 'Poppins-Regular';
 
-  console.log('TEXT_DEBUG', {
-    fontFamily,
-    rtl,
-    rtlTextAlign,
-    styleTextAlign,
-    children: typeof children === 'string' ? children.substring(0, 20) : 'node',
-  });
-
   return (
     <RNText
       style={[

@@ -1,16 +1,17 @@
 import { Text } from '@/components/common/Text';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useRemoteConfig } from '@/contexts/RemoteConfigContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { supabase } from '@/integrations/supabase/client';
 import { borderRadius, spacing } from '@/theme/spacing';
 import { isRTL, rtlIcon, rtlInput, rtlRow, rtlText } from '@/utils/rtl';
 import { toast } from '@/utils/toast';
 import { useNavigation } from '@react-navigation/native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { ArrowLeft, Globe2, MessageCircle, Phone, PlayCircle } from 'lucide-react-native';
-import React, { useEffect, useState } from 'react';
-import { KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import { ArrowLeft, Eye, EyeOff, Globe2, MessageCircle, Phone, PlayCircle } from 'lucide-react-native';
+import { useEffect, useState } from 'react';
+import { Image, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export function Login() {
@@ -18,11 +19,14 @@ export function Login() {
   const insets = useSafeAreaInsets();
   const { signIn } = useAuth();
   const { t, language, setLanguage } = useLanguage();
+  const { isPaymentsHidden } = useRemoteConfig();
   const rtl = isRTL(language);
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const styles = createStyles(colors, insets, rtl);
+  const logoSource = isDark ? require('../../../assets/images/iconDarkmode.png') : require('../../../assets/images/logo.png');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [tutorialUrl, setTutorialUrl] = useState<string | null>(null);
 
@@ -47,128 +51,48 @@ export function Login() {
 
   const handleLogin = async () => {
     if (!email || !password) {
-      toast.warning('Required', 'Please enter email and password');
+      toast.warning(t('required'), t('pleaseEnterEmailPassword'));
       return;
     }
 
     setLoading(true);
-    
     try {
       const { error, isBlocked, blockReason } = await signIn(email.trim().toLowerCase(), password);
-      
-      // If account is blocked, redirect to BlockedScreen
+
       if (isBlocked) {
-        setLoading(false);
         navigation.reset({
           index: 0,
-          routes: [{ 
-            name: 'Auth' as never, 
-            params: { 
+          routes: [{
+            name: 'Auth' as never,
+            params: {
               screen: 'Blocked' as never,
-              params: { reason: blockReason || null }
-            } 
+              params: { reason: blockReason || null },
+            },
           }],
         });
         return;
       }
-      
+
       if (error) {
-        setLoading(false);
-        
-        // Better error messages for iOS and network issues
-        let errorMessage = error.message || 'Login failed';
-        
-        // Network errors on iOS
-        if (error.message?.includes('Network') || 
-            error.message?.includes('fetch') || 
-            error.message?.includes('Failed to fetch') ||
-            error.message?.includes('network') ||
-            error.message?.includes('ECONNREFUSED') ||
-            error.message?.includes('timeout')) {
-          errorMessage = 'Network error. Please check your internet connection and try again.';
+        let errorMessage = t('wrongEmailOrPassword');
+        if (error.message?.includes('Network') || error.message?.includes('fetch') || error.message?.includes('Failed to fetch') || error.message?.includes('network') || error.message?.includes('ECONNREFUSED') || error.message?.includes('timeout') || error.message?.includes('timed out')) {
+          errorMessage = t('networkError');
+        } else if (error.message?.includes('Invalid login') || error.message?.includes('Invalid credentials') || error.message?.includes('Invalid email or password')) {
+          errorMessage = t('wrongEmailOrPassword');
+        } else if (error.message?.includes('Email not confirmed') || error.message?.includes('email_not_confirmed')) {
+          errorMessage = t('pleaseEnterEmailPassword');
         }
-        
-        // Invalid credentials
-        if (error.message?.includes('Invalid login') || 
-            error.message?.includes('Invalid credentials') ||
-            error.message?.includes('Email not confirmed') ||
-            error.message?.includes('Invalid email or password')) {
-          errorMessage = 'Invalid email or password. Please try again.';
-        }
-        
-        // Email verification
-        if (error.message?.includes('Email not confirmed') ||
-            error.message?.includes('email_not_confirmed')) {
-          errorMessage = 'Please verify your email before logging in.';
-        }
-        
-        toast.error('Login failed', errorMessage);
+        toast.error(t('loginFailed'), errorMessage);
         return;
       }
 
-      // Get current session to check owner status
-      try {
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-        
-        if (sessionError) {
-          console.error('Session error:', sessionError);
-          setLoading(false);
-          toast.error('Error', 'Failed to load session');
-          return;
-        }
-        
-        if (session?.user?.email) {
-          // Try edge function first
-          let isOwner = false;
-          try {
-            const { data: ownerCheck, error: edgeError } = await supabase.functions.invoke('owner-check', {
-              body: { email: session.user.email },
-            });
-
-            if (!edgeError && ownerCheck?.isOwner) {
-              isOwner = true;
-            }
-          } catch (edgeError) {
-            console.log('Edge function not available, using fallback');
-            // Fallback to direct query if edge function not available
-            try {
-              const { data: ownerData } = await supabase
-                .from('owner_accounts')
-                .select('id')
-                .eq('email', session.user.email)
-                .maybeSingle();
-              
-              isOwner = !!ownerData;
-            } catch (queryError) {
-              console.error('Owner check query error:', queryError);
-              // Continue without owner check
-            }
-          }
-
-          setLoading(false);
-
-          // Redirect based on owner status
-          if (isOwner) {
-            navigation.reset({
-              index: 0,
-              routes: [{ name: 'OwnerDashboard' as never }],
-            });
-          } else {
-            // Regular user - navigation will happen automatically via auth state change
-          }
-        } else {
-          setLoading(false);
-          toast.error('Error', 'Failed to load user session');
-        }
-      } catch (checkError) {
-        console.error('Error checking owner status on login:', checkError);
-        setLoading(false);
-        toast.error('Error', 'Failed to verify account status');
-      }
+      // signIn succeeded. AuthContext already set user/session; RootNavigator will re-render
+      // with Main stack and redirect to OwnerDashboard if user has admin access.
     } catch (unexpectedError: any) {
       console.error('Unexpected login error:', unexpectedError);
+      toast.error(t('error'), t('wrongEmailOrPassword'));
+    } finally {
       setLoading(false);
-      toast.error('Error', unexpectedError.message || 'Login failed');
     }
   };
 
@@ -183,7 +107,7 @@ export function Login() {
         keyboardShouldPersistTaps="handled"
       >
         {/* Top bar: back + logo + language */}
-        <View style={[styles.topBar, rtl && styles.topBarRTL]}>
+        <View style={styles.topBar}>
           <TouchableOpacity
             style={[styles.iconButton, rtlRow()]}
             onPress={() => navigation.canGoBack() && navigation.goBack()}
@@ -192,7 +116,9 @@ export function Login() {
             <ArrowLeft size={20} color={colors.foreground.muted} style={rtlIcon()} />
           </TouchableOpacity>
 
-          <View style={styles.logoContainer} />
+          <View style={styles.logoContainer}>
+            <Image source={logoSource} style={styles.logoImage} resizeMode="contain" />
+          </View>
 
           <TouchableOpacity
             style={[styles.languageBadge, rtlRow()]}
@@ -203,14 +129,12 @@ export function Login() {
             }}
           >
             <Globe2 size={16} color={colors.foreground.muted} />
-            <Text style={[styles.languageText, rtlText()]}>{language.toUpperCase()}</Text>
+            <Text style={[styles.languageText, rtlText()]}>{language === 'ckb' ? 'کوردی' : 'العربية'}</Text>
           </TouchableOpacity>
         </View>
 
-        <Text style={[styles.title, rtlText()]}>{t('welcomeBack') || 'Welcome back'}</Text>
-        <Text style={[styles.subtitle, rtlText()]}>
-          {t('signInToContinue') || 'Sign in to continue managing your ads'}
-        </Text>
+        <Text style={[styles.title, rtlText()]}>{t('welcomeBack')}</Text>
+        <Text style={[styles.subtitle, rtlText()]}>{t('signInToContinue')}</Text>
 
         <TextInput
           style={[styles.input, rtlInput()]}
@@ -223,18 +147,28 @@ export function Login() {
           autoComplete="email"
         />
 
-        <TextInput
-          style={[styles.input, rtlInput()]}
-          placeholder={t('password')}
-          placeholderTextColor={colors.input.placeholder}
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-          autoCapitalize="none"
-          autoComplete="password"
-        />
+        <View style={styles.passwordWrap}>
+          <TextInput
+            style={[styles.input, styles.passwordInput, rtlInput()]}
+            placeholder={t('password')}
+            placeholderTextColor={colors.input.placeholder}
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry={!showPassword}
+            autoCapitalize="none"
+            autoComplete="password"
+          />
+          <TouchableOpacity
+            style={styles.eyeButton}
+            onPress={() => setShowPassword((v) => !v)}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            {showPassword ? <EyeOff size={22} color={colors.foreground.muted} /> : <Eye size={22} color={colors.foreground.muted} />}
+          </TouchableOpacity>
+        </View>
 
         <TouchableOpacity
+          style={styles.forgotPasswordWrap}
           onPress={() => navigation.navigate('Auth', { screen: 'ForgotPassword' })}
         >
           <Text style={[styles.forgotPassword, rtlText()]}>{t('forgotPassword')}</Text>
@@ -282,16 +216,18 @@ export function Login() {
         </View>
 
         {/* Help row - opens WhatsApp */}
-        <TouchableOpacity
-          style={[styles.helpContainer, rtlRow()]}
-          activeOpacity={0.8}
-          onPress={() => Linking.openURL('https://wa.me/9647504881516')}
-        >
-          <MessageCircle size={16} color={colors.foreground.muted} />
-          <Text style={[styles.helpText, rtlText()]}>
-            {t('needHelpChatWithUs') || 'Chat with us on WhatsApp'}
-          </Text>
-        </TouchableOpacity>
+        {!isPaymentsHidden && (
+          <TouchableOpacity
+            style={[styles.helpContainer, rtlRow()]}
+            activeOpacity={0.8}
+            onPress={() => Linking.openURL('https://wa.me/9647504881516')}
+          >
+            <MessageCircle size={16} color={colors.foreground.muted} />
+            <Text style={[styles.helpText, rtlText()]}>
+              {t('needHelpChatWithUs') || 'Chat with us on WhatsApp'}
+            </Text>
+          </TouchableOpacity>
+        )}
 
         {/* Tutorial - account creation / how to sign up (YouTube or URL from Owner Dashboard) */}
         <TouchableOpacity
@@ -299,7 +235,7 @@ export function Login() {
           activeOpacity={0.8}
           onPress={() => Linking.openURL(tutorialUrl || 'https://www.youtube.com')}
         >
-          <PlayCircle size={16} color={colors.foreground.muted} style={rtlIcon()} />
+          <PlayCircle size={16} color={colors.foreground.muted} />
           <Text style={[styles.helpText, rtlText()]}>
             {t('tutorial') || 'Tutorial'}
           </Text>
@@ -308,7 +244,7 @@ export function Login() {
         {/* Terms & Privacy */}
         <View style={[styles.termsContainer, rtlRow()]}>
           <Text style={[styles.termsText, rtlText()]}>
-            {t('termsAgreement') || 'By signing in, you agree to our'}{' '}
+            {t('termsAgreement')}{' '}
             <Text style={[styles.termsLink, rtlText()]} onPress={() => (navigation.getParent() as any)?.navigate('Terms')}>
               {t('termsOfService') || 'Terms of Service'}
             </Text>
@@ -339,16 +275,10 @@ const createStyles = (colors: any, insets: any, rtl?: boolean) => StyleSheet.cre
     paddingVertical: spacing[6],
   },
   topBar: {
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: spacing[5],
-  },
-  topBarRTL: {
-    flexDirection: 'row',
-  },
-  rowReverse: {
-    flexDirection: 'row',
   },
   textRTL: {
     textAlign: 'right' as const,
@@ -368,6 +298,12 @@ const createStyles = (colors: any, insets: any, rtl?: boolean) => StyleSheet.cre
   logoContainer: {
     flex: 1,
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logoImage: {
+    height: 32,
+    width: 120,
+    maxWidth: '80%',
   },
   logoText: {
     fontSize: 18,
@@ -396,11 +332,15 @@ const createStyles = (colors: any, insets: any, rtl?: boolean) => StyleSheet.cre
     fontWeight: '700',
     color: colors.foreground.DEFAULT,
     marginBottom: spacing[2.5],
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
   subtitle: {
     fontSize: 16,
     color: colors.foreground.muted,
     marginBottom: spacing[8],
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
   input: {
     width: '100%',
@@ -415,12 +355,43 @@ const createStyles = (colors: any, insets: any, rtl?: boolean) => StyleSheet.cre
     backgroundColor: colors.input.background,
     color: colors.foreground.DEFAULT,
   },
+  passwordWrap: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    width: '100%',
+    marginBottom: spacing.inputGap,
+    borderWidth: 1,
+    borderColor: colors.input.border,
+    borderRadius: 12,
+    backgroundColor: colors.input.background,
+    minHeight: 52,
+  },
+  passwordWrapRTL: {
+    flexDirection: 'row',
+  },
+  passwordInput: {
+    flex: 1,
+    minHeight: 48,
+    height: 52,
+    borderWidth: 0,
+    paddingHorizontal: 16,
+    fontSize: 15,
+    marginBottom: 0,
+  },
+  eyeButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  forgotPasswordWrap: {
+    alignSelf: 'flex-end',
+    marginBottom: spacing[5],
+    marginTop: -spacing[2],
+  },
   forgotPassword: {
     color: colors.primary.DEFAULT,
     fontSize: 14,
     textAlign: 'right',
-    marginBottom: spacing[5],
-    marginTop: -spacing[2],
+    writingDirection: 'rtl',
   },
   buttonContainer: {
     width: '100%',

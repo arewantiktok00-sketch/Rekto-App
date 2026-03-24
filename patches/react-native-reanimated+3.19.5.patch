@@ -1,0 +1,133 @@
+diff --git a/node_modules/react-native-reanimated/src/ReanimatedModule/NativeReanimated.ts b/node_modules/react-native-reanimated/src/ReanimatedModule/NativeReanimated.ts
+index 78df0bc..3d330b5 100644
+--- a/node_modules/react-native-reanimated/src/ReanimatedModule/NativeReanimated.ts
++++ b/node_modules/react-native-reanimated/src/ReanimatedModule/NativeReanimated.ts
+@@ -46,32 +46,43 @@ class NativeReanimatedModule implements IReanimatedModule {
+   #reanimatedModuleProxy: ReanimatedModuleProxy;
+ 
+   constructor() {
+-    this.#workletsModule = WorkletsModule;
+-    // These checks have to split since version checking depend on the execution order
+-    if (__DEV__) {
+-      assertSingleReanimatedInstance();
+-    }
+-    global._REANIMATED_VERSION_JS = jsVersion;
+-    if (global.__reanimatedModuleProxy === undefined && ReanimatedTurboModule) {
+-      if (!ReanimatedTurboModule.installTurboModule()) {
+-        // This path means that React Native has failed on reload.
+-        // We don't want to throw any errors to not mislead the users
+-        // that the problem is related to Reanimated.
+-        // We install a DummyReanimatedModuleProxy instead.
+-        this.#reanimatedModuleProxy = new DummyReanimatedModuleProxy();
+-        return;
++    try {
++      this.#workletsModule = WorkletsModule;
++      // These checks have to split since version checking depend on the execution order
++      if (__DEV__) {
++        assertSingleReanimatedInstance();
+       }
+-    }
+-    if (global.__reanimatedModuleProxy === undefined) {
+-      throw new ReanimatedError(
+-        `Native part of Reanimated doesn't seem to be initialized.
++      global._REANIMATED_VERSION_JS = jsVersion;
++      if (global.__reanimatedModuleProxy === undefined && ReanimatedTurboModule) {
++        if (!ReanimatedTurboModule.installTurboModule()) {
++          // This path means that React Native has failed on reload.
++          // We don't want to throw any errors to not mislead the users
++          // that the problem is related to Reanimated.
++          // We install a DummyReanimatedModuleProxy instead.
++          this.#reanimatedModuleProxy = new DummyReanimatedModuleProxy();
++          return;
++        }
++      }
++      if (global.__reanimatedModuleProxy === undefined) {
++        throw new ReanimatedError(
++          `Native part of Reanimated doesn't seem to be initialized.
+ See https://docs.swmansion.com/react-native-reanimated/docs/guides/troubleshooting#native-part-of-reanimated-doesnt-seem-to-be-initialized for more details.`
+-      );
+-    }
+-    if (__DEV__) {
+-      checkCppVersion();
++        );
++      }
++      if (__DEV__) {
++        checkCppVersion();
++      }
++      this.#reanimatedModuleProxy = global.__reanimatedModuleProxy;
++    } catch (e) {
++      // Fallback when native Reanimated throws (e.g. "Exception in HostFunction: std::exception"
++      // on iOS with New Architecture). Use dummy proxy so app can run; animations will be no-ops.
++      try {
++        this.#workletsModule = WorkletsModule;
++      } catch (_) {
++        // ignore if WorkletsModule also fails
++      }
++      this.#reanimatedModuleProxy = new DummyReanimatedModuleProxy();
+     }
+-    this.#reanimatedModuleProxy = global.__reanimatedModuleProxy;
+   }
+ 
+   scheduleOnUI<T>(shareable: ShareableRef<T>) {
+diff --git a/node_modules/react-native-reanimated/src/ReanimatedModule/js-reanimated/JSReanimated.ts b/node_modules/react-native-reanimated/src/ReanimatedModule/js-reanimated/JSReanimated.ts
+index f571528..1d0dfe2 100644
+--- a/node_modules/react-native-reanimated/src/ReanimatedModule/js-reanimated/JSReanimated.ts
++++ b/node_modules/react-native-reanimated/src/ReanimatedModule/js-reanimated/JSReanimated.ts
+@@ -69,15 +69,12 @@ class JSReanimated implements IReanimatedModule {
+     _eventName: string,
+     _emitterReactTag: number
+   ): number {
+-    throw new ReanimatedError(
+-      'registerEventHandler is not available in JSReanimated.'
+-    );
++    // No-op when using JS fallback (e.g. web). Return fake id so callers don't crash.
++    return 0;
+   }
+ 
+   unregisterEventHandler(_: number): void {
+-    throw new ReanimatedError(
+-      'unregisterEventHandler is not available in JSReanimated.'
+-    );
++    // No-op when using JS fallback.
+   }
+ 
+   enableLayoutAnimations() {
+@@ -290,15 +287,13 @@ class JSReanimated implements IReanimatedModule {
+   }
+ 
+   configureProps() {
+-    throw new ReanimatedError(
+-      'configureProps is not available in JSReanimated.'
+-    );
++    // No-op when using JS-only Reanimated (e.g. on native with RN 0.81 to avoid native worklet crashes).
++    // Native prop whitelisting is not used in this configuration.
+   }
+ 
+   executeOnUIRuntimeSync<T, R>(_shareable: ShareableRef<T>): R {
+-    throw new ReanimatedError(
+-      '`executeOnUIRuntimeSync` is not available in JSReanimated.'
+-    );
++    // No-op when using JS-only Reanimated (e.g. on native with RN 0.81). No UI runtime; return undefined.
++    return undefined as R;
+   }
+ 
+   markNodeAsRemovable(_shadowNodeWrapper: ShadowNodeWrapper): void {
+diff --git a/node_modules/react-native-reanimated/src/ReanimatedModule/reanimatedModuleInstance.ts b/node_modules/react-native-reanimated/src/ReanimatedModule/reanimatedModuleInstance.ts
+index 316a38c..832e262 100644
+--- a/node_modules/react-native-reanimated/src/ReanimatedModule/reanimatedModuleInstance.ts
++++ b/node_modules/react-native-reanimated/src/ReanimatedModule/reanimatedModuleInstance.ts
+@@ -4,6 +4,11 @@ import { shouldBeUseWeb } from '../PlatformChecker';
+ import { createJSReanimatedModule } from './js-reanimated';
+ import { createNativeReanimatedModule } from './NativeReanimated';
+ 
+-export const ReanimatedModule = shouldBeUseWeb()
+-  ? createJSReanimatedModule()
+-  : createNativeReanimatedModule();
++// Use JS-only on native to avoid getHostFunction SIGABRT (JSI assert) and WorkletsMessageThread crashes.
++// Native module triggers host function calls that abort on RN 0.81 + Hermes. Stubs in JSReanimated handle registerEventHandler etc.
++function getReanimatedModule() {
++  if (shouldBeUseWeb()) return createJSReanimatedModule();
++  return createJSReanimatedModule();
++}
++
++export const ReanimatedModule = getReanimatedModule();

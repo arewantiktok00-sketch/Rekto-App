@@ -53,7 +53,7 @@ const defaultAnnouncement: AnnouncementData = {
 
 export const AnnouncementManager: React.FC = () => {
   const colors = getOwnerColors();
-  const { language } = useLanguage();
+  const { t, language } = useLanguage();
   const insets = useSafeAreaInsets();
   const typography = getTypographyStyles(language as 'ckb' | 'ar');
   const styles = createStyles(colors, insets, typography);
@@ -80,7 +80,7 @@ export const AnnouncementManager: React.FC = () => {
       }
     } catch (err: any) {
       console.error('[AnnouncementManager] fetch error:', err);
-      toast.error('Error', 'Something went wrong');
+      toast.error(t('error'), t('somethingWentWrong'));
     } finally {
       setLoading(false);
     }
@@ -134,7 +134,7 @@ export const AnnouncementManager: React.FC = () => {
       toast.success('Success', 'Operation completed');
     } catch (err: any) {
       console.error('[AnnouncementManager] save error:', err);
-      Alert.alert('Error', err.message || 'Failed to save announcement');
+      toast.error(t('error'), t('somethingWentWrong'));
     } finally {
       setSaving(false);
     }

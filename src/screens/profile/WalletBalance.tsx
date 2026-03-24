@@ -1,42 +1,66 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Modal } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ScreenHeader } from '@/components/common/ScreenHeader';
+import { Text } from '@/components/common/Text';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { supabaseRead } from '@/integrations/supabase/client';
-import { Plus, ArrowDown, AlertTriangle } from 'lucide-react-native';
 import { useTheme } from '@/contexts/ThemeContext';
-import { LinearGradient } from 'expo-linear-gradient';
-import { spacing, borderRadius } from '@/theme/spacing';
+import { usePricingConfig } from '@/hooks/usePricingConfig';
+import { supabaseRead } from '@/integrations/supabase/client';
+import { borderRadius, spacing } from '@/theme/spacing';
+import { updateWidgetBalance } from '@/utils/widgetBridge';
 import { getTypographyStyles } from '@/theme/typography';
-import { Text } from '@/components/common/Text';
-import { ScreenHeader } from '@/components/common/ScreenHeader';
-import { isRTL, rtlText, rtlRow, rtlIcon, ltrNumber } from '@/utils/rtl';
+import { formatIQD } from '@/utils/currency';
+import { isRTL, ltrNumber, rtlRow, rtlText } from '@/utils/rtl';
+import { useNavigation } from '@react-navigation/native';
+import { ArrowDown, Clock, Plus } from 'lucide-react-native';
+import { useEffect, useRef, useState } from 'react';
+import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+const walletT = {
+  title: { ckb: 'جزدان و باڵانس', ar: 'المحفظة والرصيد' },
+  currentBalance: { ckb: 'باڵانسی ئێستا', ar: 'الرصيد الحالي' },
+  available: { ckb: 'بەردەست', ar: 'المتاح' },
+  pending: { ckb: 'چاوەڕوان', ar: 'قيد الانتظار' },
+  addFunds: { ckb: 'باڵانس زیاد بکە', ar: 'إضافة رصيد' },
+  recentRequests: { ckb: 'داواکاریە نوێیەکان', ar: 'الطلبات الأخيرة' },
+  approved: { ckb: 'پەسەندکرا', ar: 'تمت الموافقة' },
+  rejected: { ckb: 'ڕەتکراوە', ar: 'مرفوض' },
+  infoText: {
+    ckb: 'باڵانسی جزدانت بۆ بەکارهێنانی ڕیکلام لە ڕێکتۆ بەکاردەهێنرێت. باڵانس زیاد بکە بۆ دەستپێکردن یان بەردەوامبوونی کامپەینەکانت.',
+    ar: 'رصيد محفظتك يُستخدم لإعلانات ريكتو. أضف رصيداً للبدء أو متابعة حملاتك.',
+  },
+};
+
+interface BalanceRequestRow {
+  id: string;
+  amount_iqd: string;
+  payment_method: string;
+  status: string;
+  rejection_reason?: string | null;
+  approved_amount_iqd?: string | null;
+  created_at: string;
+}
 
 export function WalletBalance() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { t, language } = useLanguage();
+  const { convertToIQD } = usePricingConfig();
   const rtl = isRTL(language);
   const { colors } = useTheme();
   const typography = getTypographyStyles(language as 'ckb' | 'ar');
   const styles = createStyles(colors, insets, typography, rtl);
-  const [loading, setLoading] = useState(true);
+  const initialLoadDone = useRef(false);
   const [balance, setBalance] = useState(0);
   const [pendingBalance, setPendingBalance] = useState(0);
-  const comingSoonShown = useRef(false);
-  const [showComingSoon, setShowComingSoon] = useState(false);
+  const [requests, setRequests] = useState<BalanceRequestRow[]>([]);
+
+  const w = (key: keyof typeof walletT) => walletT[key]?.[language === 'ar' ? 'ar' : 'ckb'] ?? key;
 
   useEffect(() => {
-    if (comingSoonShown.current) return;
-    comingSoonShown.current = true;
-    setShowComingSoon(true);
-  }, [t, navigation]);
-
-  useEffect(() => {
-    if (!user || comingSoonShown.current) return;
+    if (!user) return;
 
     const profileChannel = supabaseRead
       .channel(`wallet-profile-${user.id}`)
@@ -70,165 +94,161 @@ export function WalletBalance() {
       )
       .subscribe();
 
+    const requestsChannel = supabaseRead
+      .channel(`balance-requests-${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'balance_requests',
+          filter: `user_id=eq.${user.id}`,
+        },
+        () => {
+          fetchRequests();
+        }
+      )
+      .subscribe();
+
     return () => {
       supabaseRead.removeChannel(profileChannel);
       supabaseRead.removeChannel(transactionsChannel);
+      supabaseRead.removeChannel(requestsChannel);
     };
   }, [user]);
 
   const fetchBalance = async () => {
     if (!user) return;
-
     try {
       const { data } = await supabaseRead
         .from('profiles')
         .select('wallet_balance')
         .eq('user_id', user.id)
         .maybeSingle();
-
-      if (data) {
-        setBalance(data.wallet_balance || 0);
-      }
-
-      // Calculate pending balance from pending transactions
-      const { data: transactions } = await supabaseRead
-        .from('transactions')
-        .select('amount, type, status')
+      const availUsd = data?.wallet_balance ?? 0;
+      setBalance(availUsd);
+      const { data: pendingReqs } = await supabaseRead
+        .from('balance_requests')
+        .select('amount_iqd')
         .eq('user_id', user.id)
         .eq('status', 'pending');
+      let pendIqd = 0;
+      if (pendingReqs?.length) {
+        pendIqd = pendingReqs.reduce((sum, r) => sum + Number(r.amount_iqd?.replace(/,/g, '') || 0), 0);
+        setPendingBalance(pendIqd);
+      } else setPendingBalance(0);
+      updateWidgetBalance(convertToIQD(availUsd), pendIqd);
+    } catch (e) { console.error('Error fetching balance:', e); }
+    initialLoadDone.current = true;
+  };
 
-      if (transactions) {
-        const pending = transactions.reduce((sum, t) => {
-          if (t.type === 'payment') return sum - t.amount;
-          if (t.type === 'topup') return sum + t.amount;
-          return sum;
-        }, 0);
-        setPendingBalance(pending);
-      }
-    } catch (error) {
-      console.error('Error fetching balance:', error);
-    } finally {
-      setLoading(false);
+  const fetchRequests = async () => {
+    if (!user) return;
+    try {
+      const { data } = await supabaseRead
+        .from('balance_requests')
+        .select('id, amount_iqd, payment_method, status, rejection_reason, approved_amount_iqd, created_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+      if (data) setRequests(data);
+    } catch (e) {
+      console.error(e);
     }
   };
 
+  useEffect(() => {
+    if (!user) return;
+    fetchBalance();
+    fetchRequests();
+  }, [user]);
+
   return (
     <View style={styles.container}>
-      <Modal
-        visible={showComingSoon}
-        transparent
-        animationType="fade"
-        onRequestClose={() => {
-          setShowComingSoon(false);
-          navigation.goBack();
-        }}
-      >
-        <View style={styles.comingSoonBackdrop}>
-          <View style={styles.comingSoonCard}>
-            <View style={styles.comingSoonHeader}>
-              <View style={styles.comingSoonIconWrap}>
-                <AlertTriangle size={26} color="#FFFFFF" />
-              </View>
-              <Text style={[styles.comingSoonTitle, rtlText(rtl)]}>{t('comingSoon') || 'Coming Soon'}</Text>
-            </View>
-            <View style={styles.comingSoonBody}>
-              <Text style={[styles.comingSoonText, rtlText(rtl)]}>
-                {t('walletComingSoon') || 'Wallet balance is not supported yet.'}
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={styles.comingSoonButton}
-              onPress={() => {
-                setShowComingSoon(false);
-                navigation.goBack();
-              }}
-            >
-              <Text style={[styles.comingSoonButtonText, rtlText(rtl)]}>OK</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-      {loading && (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary.DEFAULT} />
-        </View>
-      )}
       <ScreenHeader
-        title={t('walletAndBalance') || 'Wallet & Balance'}
+        title={w('title')}
         onBack={() => navigation.goBack()}
         style={{ paddingTop: insets.top + 8 }}
       />
-
+      <View style={styles.contentArea}>
       <ScrollView
-        style={{ flex: 1 }}
+        style={styles.scrollView}
         contentContainerStyle={{ paddingBottom: 40 }}
         showsVerticalScrollIndicator={false}
       >
         <View style={{ paddingHorizontal: 16, width: '100%' }}>
-        {/* Current Balance Card */}
+        {/* Current Balance Card - purple gradient */}
         <LinearGradient
-          colors={colors.gradients.primary}
+          colors={['#7C3AED', '#6D28D9']}
           style={styles.balanceCard}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
         >
-          <Text style={[styles.balanceLabel, rtlText(rtl)]}>
-            {t('currentBalance') || 'Current Balance'}
-          </Text>
-          <Text style={[styles.balanceAmount, ltrNumber]}>${balance.toFixed(2)}</Text>
-          <Text style={[styles.balanceIQD, ltrNumber]}>≈ IQD {(balance * 1800).toLocaleString()}</Text>
+          <Text style={[styles.balanceLabel, rtlText(rtl)]}>{w('currentBalance')}</Text>
+          <Text style={[styles.balanceAmount, ltrNumber]}>{formatIQD(convertToIQD(balance))}</Text>
         </LinearGradient>
 
-        {/* Available / Pending */}
+        {/* Available / Pending - two cards side by side (USD in state, display IQD) */}
         <View style={[styles.statsRow, rtlRow(rtl)]}>
           <View style={styles.statBox}>
-            <Text style={[styles.statLabel, rtlText(rtl)]}>{t('available') || 'Available'}</Text>
-            <Text style={[styles.statValue, ltrNumber]}>${balance.toFixed(2)}</Text>
+            <ArrowDown size={20} color="#22C55E" style={{ marginBottom: 4 }} />
+            <Text style={[styles.statLabel, rtlText(rtl)]}>{w('available')}</Text>
+            <Text style={[styles.statValue, ltrNumber]}>{formatIQD(convertToIQD(balance))}</Text>
           </View>
           <View style={styles.statBox}>
-            <Text style={[styles.statLabel, rtlText(rtl)]}>{t('pendingBalance') || 'Pending'}</Text>
-            <Text style={[styles.statValue, ltrNumber]}>${Math.abs(pendingBalance).toFixed(2)}</Text>
+            <Clock size={20} color="#F59E0B" style={{ marginBottom: 4 }} />
+            <Text style={[styles.statLabel, rtlText(rtl)]}>{w('pending')}</Text>
+            <Text style={[styles.statValue, ltrNumber]}>{formatIQD(pendingBalance)}</Text>
           </View>
         </View>
 
         <View style={styles.infoCard}>
-          <Text style={[styles.infoText, rtlText(rtl)]}>
-            {t('walletInfo') ||
-              'Your wallet balance is used to run ads on Rekto. Add funds to start or continue your campaigns.'}
-          </Text>
+          <Text style={[styles.infoText, rtlText(rtl)]}>{w('infoText')}</Text>
         </View>
 
-        <View style={[styles.actions, rtlRow(rtl)]}>
-          <TouchableOpacity
-            style={styles.actionButtonContainer}
-            onPress={() => {
-              // Navigate to add funds
-            }}
+        <TouchableOpacity
+          style={styles.addFundsButtonWrap}
+          onPress={() => navigation.navigate('AddBalance' as never)}
+        >
+          <LinearGradient
+            colors={['#7C3AED', '#6D28D9']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={[styles.addFundsButton, rtlRow(rtl)]}
           >
-            <LinearGradient
-              colors={['#7C3AED', '#9333EA']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={[styles.actionButton, rtlRow(rtl)]}
-            >
-              <Plus size={20} color="#fff" style={rtlIcon(rtl)} />
-              <Text style={[styles.actionButtonText, rtlText(rtl)]}>{t('addFunds')}</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.actionButton, styles.actionButtonSecondary, rtlRow(rtl)]}
-            onPress={() => {
-              // Navigate to withdraw
-            }}
-          >
-            <ArrowDown size={20} color={colors.primary.DEFAULT} style={rtlIcon(rtl)} />
-            <Text style={[styles.actionButtonText, styles.actionButtonTextSecondary, rtlText(rtl)]}>
-              {t('withdraw')}
-            </Text>
-          </TouchableOpacity>
-        </View>
+            <Plus size={20} color="#fff" />
+            <Text style={[styles.addFundsButtonText, rtlText(rtl)]}>+ {w('addFunds')}</Text>
+          </LinearGradient>
+        </TouchableOpacity>
+
+        <Text style={[styles.sectionLabel, rtlText(rtl)]}>{w('recentRequests')}</Text>
+        {requests.length > 0 ? requests.slice(0, 5).map((req) => {
+              const isPending = req.status === 'pending';
+              const isApproved = req.status === 'approved';
+              const badgeColor = isPending ? '#F59E0B' : isApproved ? '#22C55E' : '#EF4444';
+              const statusLabel = isPending ? w('pending') : isApproved ? w('approved') : w('rejected');
+              const addedIqd = req.approved_amount_iqd ? Number(String(req.approved_amount_iqd).replace(/,/g, '')) : 0;
+              return (
+                <View key={req.id} style={[styles.requestCard, rtlRow(rtl)]}>
+                  <View style={styles.requestRow}>
+                    <Text style={[styles.requestAmount, rtlText(rtl)]}>{formatIQD(Number(String(req.amount_iqd).replace(/,/g, '')))} — {new Date(req.created_at).toLocaleDateString(language === 'ar' ? 'ar-IQ' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</Text>
+                    <View style={[styles.badge, { backgroundColor: badgeColor + '22' }]}>
+                      <Text style={[styles.badgeText, { color: badgeColor }, rtlText(rtl)]}>{statusLabel}</Text>
+                    </View>
+                  </View>
+                  {req.rejection_reason ? (
+                    <Text style={[styles.rejectionText, rtlText(rtl)]}>{req.rejection_reason}</Text>
+                  ) : null}
+                  {isApproved && addedIqd > 0 ? (
+                    <Text style={[styles.creditedText, rtlText(rtl)]}>+{formatIQD(addedIqd)} زیادکرا</Text>
+                  ) : null}
+                </View>
+              );
+            }) : (
+          <Text style={[styles.emptyRequests, rtlText(rtl)]}>هیچ داواکاریەک نییە</Text>
+        )}
         </View>
       </ScrollView>
+      </View>
     </View>
   );
 }
@@ -238,10 +258,12 @@ const createStyles = (colors: any, insets: any, typography: any, rtl?: boolean) 
     flex: 1,
     backgroundColor: colors.background.DEFAULT,
   },
-  loadingContainer: {
+  contentArea: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    minHeight: 0,
+  },
+  scrollView: {
+    flex: 1,
   },
   content: {
     flex: 1,
@@ -268,21 +290,16 @@ const createStyles = (colors: any, insets: any, typography: any, rtl?: boolean) 
     justifyContent: 'center',
   },
   balanceLabel: {
-    ...typography.caption,
+    fontFamily: 'Rabar_021',
     fontSize: 12,
     color: 'rgba(255, 255, 255, 0.9)',
     marginBottom: spacing.sm,
   },
   balanceAmount: {
-    ...typography.h1,
+    fontFamily: 'Poppins-Bold',
     fontSize: 40,
-    color: colors.primary.foreground,
+    color: '#FFFFFF',
     marginBottom: spacing.xs,
-  },
-  balanceIQD: {
-    ...typography.body,
-    fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.8)',
   },
   statsRow: {
     flexDirection: 'row',
@@ -303,56 +320,48 @@ const createStyles = (colors: any, insets: any, typography: any, rtl?: boolean) 
     elevation: 2,
   },
   statLabel: {
-    ...typography.caption,
+    fontFamily: 'Rabar_021',
     fontSize: 12,
     color: colors.foreground.muted,
     marginBottom: spacing.xs,
   },
   statValue: {
-    ...typography.h2,
+    fontFamily: 'Poppins-SemiBold',
     fontSize: 20,
     color: colors.foreground.DEFAULT,
   },
   infoCard: {
-    backgroundColor: colors.card.background,
+    backgroundColor: (colors.primary?.DEFAULT ?? '#7C3AED') + '18',
     borderRadius: borderRadius.card,
     padding: spacing.md,
     borderWidth: 1,
-    borderColor: colors.border.DEFAULT,
+    borderColor: (colors.primary?.DEFAULT ?? '#7C3AED') + '30',
     marginBottom: spacing.lg,
   },
   infoText: {
-    ...typography.bodySmall,
+    fontFamily: 'Rabar_021',
     fontSize: 13,
     color: colors.foreground.muted,
   },
-  actions: {
-    flexDirection: 'row',
-    gap: spacing.md,
+  addFundsButtonWrap: {
+    width: '100%',
+    marginBottom: spacing.lg,
+    borderRadius: borderRadius.button,
+    overflow: 'hidden',
   },
-  actionButton: {
+  addFundsButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: spacing.md,
-    borderRadius: borderRadius.button,
     gap: spacing.sm,
     height: 56,
   },
-  actionButtonSecondary: {
-    backgroundColor: 'transparent',
-    borderWidth: 2,
-    borderColor: colors.primary.DEFAULT,
-  },
-  actionButtonText: {
-    ...typography.body,
-    color: colors.primary.foreground,
+  addFundsButtonText: {
+    fontFamily: 'Rabar_021',
+    color: '#FFFFFF',
     fontSize: 17,
     fontWeight: '600',
-  },
-  actionButtonTextSecondary: {
-    ...typography.body,
-    color: colors.primary.DEFAULT,
   },
   comingSoonBackdrop: {
     flex: 1,
@@ -417,4 +426,32 @@ const createStyles = (colors: any, insets: any, typography: any, rtl?: boolean) 
     fontWeight: '700',
     fontSize: 14,
   },
+  sectionLabel: {
+    fontFamily: 'Rabar_021',
+    fontSize: 12,
+    color: colors.foreground.muted,
+    marginTop: spacing.lg,
+    marginBottom: spacing.sm,
+  },
+  emptyRequests: {
+    fontFamily: 'Rabar_021',
+    fontSize: 14,
+    color: colors.foreground.muted,
+    textAlign: 'right',
+    marginTop: spacing.sm,
+  },
+  requestCard: {
+    backgroundColor: colors.card.background,
+    borderRadius: borderRadius.card,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border.DEFAULT,
+  },
+  requestRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  requestAmount: { fontFamily: 'Rabar_021', fontWeight: '600', fontSize: 15, color: colors.foreground.DEFAULT },
+  badge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  badgeText: { fontFamily: 'Rabar_021', fontSize: 12, fontWeight: '600' },
+  rejectionText: { fontFamily: 'Rabar_021', fontSize: 12, color: colors.error, marginTop: 4 },
+  creditedText: { fontFamily: 'Poppins-Medium', fontSize: 12, color: '#22C55E', marginTop: 4 },
 });

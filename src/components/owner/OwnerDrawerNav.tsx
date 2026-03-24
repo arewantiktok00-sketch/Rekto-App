@@ -1,6 +1,7 @@
 import { useLanguage } from '@/contexts/LanguageContext';
 import { getOwnerColors } from '@/theme/colors';
 import { getFontFamilyByLanguage } from '@/utils/fonts';
+import { safeCall } from '@/utils/safeCall';
 import {
     Activity,
     Bell,
@@ -22,6 +23,7 @@ import {
     UserCheck,
     Users,
     Video,
+    Wallet,
     X,
 } from 'lucide-react-native';
 import React from 'react';
@@ -35,147 +37,43 @@ import {
 
 interface NavItem {
   id: string;
-  label: string;
+  labelKey: string;
   icon: React.ReactNode;
   category: string;
 }
 
 const NAV_ITEMS: NavItem[] = [
-  // Main
-  {
-    id: 'review',
-    label: 'Ad Review',
-    icon: <ClipboardCheck size={20} />,
-    category: 'main',
-  },
-  {
-    id: 'featured',
-    label: 'Featured Ad',
-    icon: <Star size={20} />,
-    category: 'main',
-  },
-  {
-    id: 'app-control',
-    label: 'App Control',
-    icon: <Settings size={20} />,
-    category: 'main',
-  },
-  {
-    id: 'banner',
-    label: 'Banner Content',
-    icon: <Image size={20} />,
-    category: 'main',
-  },
-  {
-    id: 'promo',
-    label: 'Promo Banner',
-    icon: <Gift size={20} />,
-    category: 'main',
-  },
-  // TikTok
-  {
-    id: 'health',
-    label: 'Health',
-    icon: <Activity size={20} />,
-    category: 'tiktok',
-  },
-  {
-    id: 'api',
-    label: 'API Settings',
-    icon: <Key size={20} />,
-    category: 'tiktok',
-  },
-  {
-    id: 'accounts',
-    label: 'Business Center',
-    icon: <Building2 size={20} />,
-    category: 'tiktok',
-  },
-  {
-    id: 'buttons',
-    label: 'Buttons',
-    icon: <MousePointer2 size={20} />,
-    category: 'tiktok',
-  },
-  // Content
-  {
-    id: 'faqs',
-    label: 'FAQs',
-    icon: <HelpCircle size={20} />,
-    category: 'content',
-  },
-  {
-    id: 'tutorials',
-    label: 'Tutorials',
-    icon: <Video size={20} />,
-    category: 'content',
-  },
-  {
-    id: 'announcement',
-    label: 'Popup Announce',
-    icon: <Megaphone size={20} />,
-    category: 'content',
-  },
-  // Users
-  {
-    id: 'users',
-    label: 'Users',
-    icon: <Users size={20} />,
-    category: 'users',
-  },
-  {
-    id: 'permissions',
-    label: 'Permissions',
-    icon: <Shield size={20} />,
-    category: 'users',
-  },
-  {
-    id: 'admins',
-    label: 'Admins',
-    icon: <ShieldCheck size={20} />,
-    category: 'users',
-  },
-  {
-    id: 'reviewers',
-    label: 'Reviewers',
-    icon: <UserCheck size={20} />,
-    category: 'users',
-  },
-  // Finance
-  {
-    id: 'pricing',
-    label: 'Pricing',
-    icon: <DollarSign size={20} />,
-    category: 'finance',
-  },
-  {
-    id: 'discounts',
-    label: 'Discounts',
-    icon: <Percent size={20} />,
-    category: 'finance',
-  },
-  // System
-  {
-    id: 'logs',
-    label: 'Logs',
-    icon: <FileText size={20} />,
-    category: 'system',
-  },
-  {
-    id: 'broadcast',
-    label: 'Broadcast',
-    icon: <Bell size={20} />,
-    category: 'system',
-  },
+  { id: 'review', labelKey: 'adReview', icon: <ClipboardCheck size={20} />, category: 'main' },
+  { id: 'featured', labelKey: 'featuredAd', icon: <Star size={20} />, category: 'main' },
+  { id: 'app-control', labelKey: 'appControlPanel', icon: <Settings size={20} />, category: 'main' },
+  { id: 'banner', labelKey: 'bannerContentManager', icon: <Image size={20} />, category: 'main' },
+  { id: 'promo', labelKey: 'promoBannerManager', icon: <Gift size={20} />, category: 'main' },
+  { id: 'health', labelKey: 'health', icon: <Activity size={20} />, category: 'tiktok' },
+  { id: 'api', labelKey: 'apiSettings', icon: <Key size={20} />, category: 'tiktok' },
+  { id: 'accounts', labelKey: 'adAccounts', icon: <Building2 size={20} />, category: 'tiktok' },
+  { id: 'buttons', labelKey: 'buttons', icon: <MousePointer2 size={20} />, category: 'tiktok' },
+  { id: 'faqs', labelKey: 'faq', icon: <HelpCircle size={20} />, category: 'content' },
+  { id: 'tutorials', labelKey: 'tutorials', icon: <Video size={20} />, category: 'content' },
+  { id: 'announcement', labelKey: 'popupAnnounce', icon: <Megaphone size={20} />, category: 'content' },
+  { id: 'users', labelKey: 'users', icon: <Users size={20} />, category: 'users' },
+  { id: 'permissions', labelKey: 'permissions', icon: <Shield size={20} />, category: 'users' },
+  { id: 'admins', labelKey: 'admins', icon: <ShieldCheck size={20} />, category: 'users' },
+  { id: 'reviewers', labelKey: 'reviewers', icon: <UserCheck size={20} />, category: 'users' },
+  { id: 'pricing', labelKey: 'pricingConfig', icon: <DollarSign size={20} />, category: 'finance' },
+  { id: 'discounts', labelKey: 'discounts', icon: <Percent size={20} />, category: 'finance' },
+  { id: 'balance', labelKey: 'balance', icon: <Wallet size={20} />, category: 'finance' },
+  { id: 'transaction-logs', labelKey: 'transactions', icon: <DollarSign size={20} />, category: 'finance' },
+  { id: 'logs', labelKey: 'logs', icon: <FileText size={20} />, category: 'system' },
+  { id: 'broadcast', labelKey: 'broadcast', icon: <Bell size={20} />, category: 'system' },
 ];
 
-const CATEGORIES = [
-  { id: 'main', label: 'Main' },
-  { id: 'tiktok', label: 'TikTok' },
-  { id: 'content', label: 'Content' },
-  { id: 'users', label: 'Users' },
-  { id: 'finance', label: 'Finance' },
-  { id: 'system', label: 'System' },
+const CATEGORY_IDS: { id: string; labelKey: string }[] = [
+  { id: 'main', labelKey: 'main' },
+  { id: 'tiktok', labelKey: 'tiktok' },
+  { id: 'content', labelKey: 'content' },
+  { id: 'users', labelKey: 'users' },
+  { id: 'finance', labelKey: 'finance' },
+  { id: 'system', labelKey: 'system' },
 ];
 
 interface OwnerDrawerNavProps {
@@ -194,18 +92,17 @@ export const OwnerDrawerNav: React.FC<OwnerDrawerNavProps> = ({
   isReviewerOnly = false,
 }) => {
   const colors = getOwnerColors();
-  const { language } = useLanguage();
+  const { language, t } = useLanguage();
   const fontFamily = getFontFamilyByLanguage((language || 'ckb') as 'ckb' | 'ar');
   const styles = createStyles(colors, fontFamily);
 
   if (!visible) return null;
 
   const handleItemPress = (tabId: string) => {
-    onTabChange(tabId);
-    onClose();
+    safeCall(onTabChange, tabId);
+    safeCall(onClose);
   };
 
-  // Filter items based on reviewer access
   const getFilteredItems = () => {
     if (isReviewerOnly) {
       return NAV_ITEMS.filter((item) => item.id === 'review');
@@ -217,16 +114,16 @@ export const OwnerDrawerNav: React.FC<OwnerDrawerNavProps> = ({
 
   return (
     <View style={styles.overlay}>
-      <TouchableOpacity style={styles.backdrop} onPress={onClose} activeOpacity={1} />
+      <TouchableOpacity style={styles.backdrop} onPress={() => safeCall(onClose)} activeOpacity={1} />
       <View style={styles.drawer}>
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Navigation</Text>
-          <TouchableOpacity onPress={onClose}>
+          <Text style={styles.headerTitle}>{t('navigation')}</Text>
+          <TouchableOpacity onPress={() => safeCall(onClose)}>
             <X color={colors.foreground.DEFAULT} size={24} />
           </TouchableOpacity>
         </View>
         <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-          {CATEGORIES.map((category) => {
+          {CATEGORY_IDS.map((category) => {
             const categoryItems = filteredItems.filter(
               (item) => item.category === category.id
             );
@@ -234,7 +131,7 @@ export const OwnerDrawerNav: React.FC<OwnerDrawerNavProps> = ({
 
             return (
               <View key={category.id} style={styles.category}>
-                <Text style={styles.categoryLabel}>{category.label}</Text>
+                <Text style={styles.categoryLabel}>{t(category.labelKey)}</Text>
                 {categoryItems.map((item) => {
                   const isActive = activeTab === item.id;
                   return (
@@ -262,7 +159,7 @@ export const OwnerDrawerNav: React.FC<OwnerDrawerNavProps> = ({
                           isActive && styles.activeNavLabel,
                         ]}
                       >
-                        {item.label}
+                        {t(item.labelKey)}
                       </Text>
                     </TouchableOpacity>
                   );

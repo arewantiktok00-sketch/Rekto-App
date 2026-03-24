@@ -7,9 +7,10 @@ import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useRemoteConfig } from '@/contexts/RemoteConfigContext';
 import { Home, LayoutGrid, Plus, Link2, GraduationCap } from 'lucide-react-native';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import LinearGradient from 'react-native-linear-gradient';
 
 import { Dashboard } from '@/screens/main/Dashboard';
 import Campaigns from '@/screens/main/Campaigns';
@@ -22,7 +23,7 @@ import { CampaignDetail } from '@/screens/main/CampaignDetail';
 import { PaymentSuccess } from '@/screens/main/PaymentSuccess';
 import { Analytics } from '@/screens/main/Analytics';
 import { Notifications } from '@/screens/main/Notifications';
-import { Invoice } from '@/screens/main/Invoice';
+import Invoice from '@/screens/main/Invoice';
 import { TopResultsScreen } from '@/screens/TopResultsScreen';
 import { Terms } from '@/screens/legal/Terms';
 import { Privacy } from '@/screens/legal/Privacy';
@@ -50,6 +51,7 @@ const DESIGN = {
 
 function MainTabsWithSpec() {
   const { t, language } = useLanguage();
+  const { isPaymentsHidden } = useRemoteConfig();
   const fontFamily = getFontFamilyByLanguage(language as 'ckb' | 'ar');
 
   return (
@@ -123,7 +125,7 @@ function MainTabsWithSpec() {
     >
       <Tab.Screen name="Dashboard" component={Dashboard} />
       <Tab.Screen name="Campaigns" component={Campaigns} />
-      <Tab.Screen name="CreateAd" component={CreateAd} />
+      {!isPaymentsHidden && <Tab.Screen name="CreateAd" component={CreateAd} />}
       <Tab.Screen name="Links" component={Links} />
       <Tab.Screen name="Tutorial" component={Tutorial} />
     </Tab.Navigator>

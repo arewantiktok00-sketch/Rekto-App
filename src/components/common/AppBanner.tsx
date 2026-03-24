@@ -8,6 +8,7 @@ import { spacing, borderRadius } from '@/theme/spacing';
 import { getTypographyStyles } from '@/theme/typography';
 import Animated, { FadeInDown, FadeOutUp } from 'react-native-reanimated';
 import { Text } from '@/components/common/Text';
+import { safeCall } from '@/utils/safeCall';
 
 interface AppBannerProps {
   onDismiss?: () => void;
@@ -31,9 +32,7 @@ export const AppBanner: React.FC<AppBannerProps> = ({ onDismiss }) => {
   };
 
   const handleDismiss = () => {
-    if (onDismiss) {
-      onDismiss();
-    }
+    safeCall(onDismiss);
   };
 
   return (

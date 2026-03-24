@@ -1,18 +1,22 @@
-import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ScreenHeader } from '@/components/common/ScreenHeader';
+import { Text } from '@/components/common/Text';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { supabaseRead } from '@/integrations/supabase/client';
-import { ArrowUpRight, FileText } from 'lucide-react-native';
 import { useTheme } from '@/contexts/ThemeContext';
-import { spacing, borderRadius } from '@/theme/spacing';
+import { supabaseRead } from '@/integrations/supabase/client';
+import { borderRadius, spacing } from '@/theme/spacing';
 import { getTypographyStyles } from '@/theme/typography';
-import { format } from 'date-fns';
-import { Text } from '@/components/common/Text';
-import { isRTL, rtlText, rtlRow, rtlIcon, ltrNumber } from '@/utils/rtl';
-import { ScreenHeader } from '@/components/common/ScreenHeader';
+import { formatDateNumericDMY } from '@/utils/dateFormat';
+import { isRTL, ltrNumber, rtlRow, rtlText } from '@/utils/rtl';
+import { translateTransactionStatus, translateTransactionType } from '@/utils/transactionCampaignTranslator';
+import { usePricingConfig } from '@/hooks/usePricingConfig';
+import { formatIQDEnglish, formatNumberEnglish } from '@/utils/currency';
+import { calculateTax } from '@/lib/pricing';
+import { useNavigation } from '@react-navigation/native';
+import { ArrowUpRight, FileText } from 'lucide-react-native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface Transaction {
   id: string;
@@ -24,11 +28,12 @@ interface Transaction {
   campaign_id?: string;
 }
 
-export function TransactionHistory() {
+export function TransactionHistory(props: { embedded?: boolean } = { embedded: false }) {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { t, language } = useLanguage();
+  const { exchange_rate } = usePricingConfig();
   const rtl = isRTL(language);
   const { colors } = useTheme();
   const typography = getTypographyStyles(language as 'ckb' | 'ar');
@@ -94,6 +99,8 @@ export function TransactionHistory() {
       ? transactions
       : transactions.filter((tx) => tx.type === filter);
 
+  const embedded = Boolean((props as any)?.embedded);
+
   return (
     <View style={styles.container}>
       {loading && (
@@ -101,15 +108,17 @@ export function TransactionHistory() {
           <ActivityIndicator size="large" color={colors.primary.DEFAULT} />
         </View>
       )}
-      <ScreenHeader
-        title={t('transactionHistory') || 'Transaction History'}
-        onBack={() => navigation.goBack()}
-        style={{ paddingTop: insets.top + 8 }}
-      />
+      {!embedded && (
+        <ScreenHeader
+          title={t('transactionHistory') || 'Transaction History'}
+          onBack={() => navigation.goBack()}
+          style={{ paddingTop: insets.top + 8 }}
+        />
+      )}
 
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: 40 }}
+        contentContainerStyle={{ paddingBottom: embedded ? 0 : 40 }}
         showsVerticalScrollIndicator={false}
       >
         <View style={{ paddingHorizontal: 16, width: '100%' }}>
@@ -154,9 +163,31 @@ export function TransactionHistory() {
         ) : (
           filteredTransactions.map((transaction) => {
             const color = getTransactionColor(transaction.type);
-            const isPositive = transaction.type === 'topup' || transaction.type === 'refund';
+            const isPositive = transaction.amount > 0;
+            const baseAmount = Math.abs(transaction.amount);
+            const baseType = (transaction.type || '').toLowerCase();
+            const isRefund = baseType === 'refund';
+            const hasTax =
+              baseType === 'payment' ||
+              baseType === 'spend' ||
+              baseType === 'campaign_payment';
+
+            let totalIqd = 0;
+            let budgetIqd = 0;
+            let taxIqd = 0;
+
+            if (hasTax) {
+              const taxUsd = calculateTax(baseAmount);
+              budgetIqd = Math.floor(baseAmount * exchange_rate);
+              taxIqd = Math.floor(taxUsd * exchange_rate);
+              totalIqd = budgetIqd + taxIqd;
+            } else {
+              // Refund / deposit / admin types: DB amount already final value
+              totalIqd = Math.floor(baseAmount * exchange_rate);
+            }
+
             const sign = isPositive ? '+' : '-';
-            const amountText = `${sign}$${Math.abs(transaction.amount).toFixed(2)}`;
+            const mainAmountText = `${sign}${formatNumberEnglish(totalIqd)} IQD`;
 
             return (
               <TouchableOpacity
@@ -175,19 +206,21 @@ export function TransactionHistory() {
                   </View>
                 <View style={styles.transactionInfo}>
                   <Text style={[styles.transactionType, rtlText(rtl)]} numberOfLines={1}>
-                      {t(transaction.type) ||
-                        transaction.type.charAt(0).toUpperCase() +
-                          transaction.type.slice(1)}
-                  </Text>
-                  <Text style={[styles.transactionDate, ltrNumber]}>
-                      {format(new Date(transaction.created_at), 'MMM dd, yyyy')}
+                    {translateTransactionType(transaction.type, language as 'ckb' | 'ar')}
                   </Text>
                 </View>
               </View>
-              <View style={[styles.transactionRight, rtl && styles.transactionRightRTL]}>
+              <View style={styles.transactionRight}>
                   <Text style={[styles.transactionAmount, ltrNumber, { color }]}>
-                    {amountText}
-                </Text>
+                    {mainAmountText}
+                  </Text>
+                  {hasTax && (
+                    <Text style={[styles.taxBreakdown, ltrNumber]}>
+                      {`بودجە ${formatNumberEnglish(budgetIqd)} IQD + باج ${formatNumberEnglish(
+                        taxIqd,
+                      )} IQD`}
+                    </Text>
+                  )}
                   <View
                     style={[
                   styles.statusBadge, 
@@ -206,7 +239,10 @@ export function TransactionHistory() {
                       ]}
                       numberOfLines={1}
                     >
-                      {transaction.status}
+                      {translateTransactionStatus(transaction.status, language as 'ckb' | 'ar')}
+                    </Text>
+                    <Text style={[styles.statusDate, ltrNumber]}>
+                      {formatDateNumericDMY(new Date(transaction.created_at))}
                     </Text>
                 </View>
               </View>
@@ -229,9 +265,6 @@ const createStyles = (colors: any, insets: any, typography: any, rtl?: boolean) 
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  rowReverse: {
-    flexDirection: 'row',
   },
   textRTL: {
     textAlign: 'right',
@@ -356,13 +389,16 @@ const createStyles = (colors: any, insets: any, typography: any, rtl?: boolean) 
     marginStart: spacing.sm,
     flexShrink: 0,
   },
-  transactionRightRTL: {
-    alignItems: 'flex-start',
-  },
   transactionAmount: {
     ...typography.body,
     fontSize: 16,
     fontWeight: '700',
+    marginBottom: spacing.xs,
+  },
+  taxBreakdown: {
+    ...typography.caption,
+    fontSize: 11,
+    color: colors.foreground.muted,
     marginBottom: spacing.xs,
   },
   statusBadge: {
@@ -389,5 +425,11 @@ const createStyles = (colors: any, insets: any, typography: any, rtl?: boolean) 
   },
   statusTextCompleted: {
     color: colors.status.active.text,
+  },
+  statusDate: {
+    ...typography.caption,
+    fontSize: 11,
+    color: colors.foreground.muted,
+    marginTop: 2,
   },
 });

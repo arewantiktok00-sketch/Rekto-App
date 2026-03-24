@@ -1,16 +1,16 @@
-import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { ScreenHeader } from '@/components/common/ScreenHeader';
+import { Text } from '@/components/common/Text';
 import { useAuth } from '@/contexts/AuthContext';
-import { useTheme } from '@/contexts/ThemeContext';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useTheme } from '@/contexts/ThemeContext';
 import { supabase, supabaseRead } from '@/integrations/supabase/client';
-import { LinearGradient } from 'expo-linear-gradient';
 import { spacing } from '@/theme/spacing';
 import { toast } from '@/utils/toast';
-import { ArrowLeft, Mail } from 'lucide-react-native';
-import { Text } from '@/components/common/Text';
-import { ScreenHeader } from '@/components/common/ScreenHeader';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import { Mail } from 'lucide-react-native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, StyleSheet, TouchableOpacity, View } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 
 export function ChangePasswordSendCode() {
   const navigation = useNavigation();
@@ -49,7 +49,7 @@ export function ChangePasswordSendCode() {
   const handleSendCode = async () => {
     const emailToUse = email?.trim()?.toLowerCase();
     if (!emailToUse) {
-      toast.warning('Error', 'No email found for your account');
+      toast.warning(t('error'), t('noEmailFound'));
       return;
     }
     setLoading(true);
@@ -58,17 +58,17 @@ export function ChangePasswordSendCode() {
         body: { action: 'send_code', email: emailToUse },
       });
       if (error) {
-        toast.error('Error', error.message || 'Failed to send code');
+        toast.error(t('error'), error.message || t('couldNotSendCode'));
         return;
       }
       if (data?.error || data?.success === false) {
-        toast.error('Error', (data?.error as string) || (data?.message as string) || 'Failed to send code');
+        toast.error(t('error'), (data?.error as string) || (data?.message as string) || t('couldNotSendCode'));
         return;
       }
-      toast.success('Code Sent', 'Check your email for the code');
+      toast.success(t('codeSent'), t('checkYourEmailForCode'));
       navigation.navigate('ChangePasswordOTP' as never, { email: emailToUse } as never);
     } catch (err: any) {
-      toast.error('Error', err.message || 'Failed to send verification code');
+      toast.error(t('error'), err.message || t('couldNotSendCode'));
     } finally {
       setLoading(false);
     }

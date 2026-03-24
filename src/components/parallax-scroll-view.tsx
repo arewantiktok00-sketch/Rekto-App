@@ -2,9 +2,9 @@ import type { PropsWithChildren, ReactElement } from 'react';
 import { StyleSheet } from 'react-native';
 import Animated, {
   interpolate,
-  useAnimatedRef,
+  useAnimatedScrollHandler,
   useAnimatedStyle,
-  useScrollOffset,
+  useSharedValue,
 } from 'react-native-reanimated';
 
 import { ThemedView } from '@/components/themed-view';
@@ -25,30 +25,36 @@ export default function ParallaxScrollView({
 }: Props) {
   const backgroundColor = useThemeColor({}, 'background');
   const colorScheme = useColorScheme() ?? 'light';
-  const scrollRef = useAnimatedRef<Animated.ScrollView>();
-  const scrollOffset = useScrollOffset(scrollRef);
+  const scrollOffset = useSharedValue(0);
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: (event) => {
+      if (!event?.contentOffset) return;
+      const y = event.contentOffset.y;
+      if (typeof y !== 'number') return;
+      scrollOffset.value = y;
+    },
+  });
   const headerAnimatedStyle = useAnimatedStyle(() => {
+    const offset = typeof scrollOffset.value === 'number' ? scrollOffset.value : 0;
+    const translateY = interpolate(
+      offset,
+      [-HEADER_HEIGHT, 0, HEADER_HEIGHT],
+      [-HEADER_HEIGHT / 2, 0, HEADER_HEIGHT * 0.75]
+    );
+    const scale = interpolate(offset, [-HEADER_HEIGHT, 0, HEADER_HEIGHT], [2, 1, 1]);
     return {
       transform: [
-        {
-          translateY: interpolate(
-            scrollOffset.value,
-            [-HEADER_HEIGHT, 0, HEADER_HEIGHT],
-            [-HEADER_HEIGHT / 2, 0, HEADER_HEIGHT * 0.75]
-          ),
-        },
-        {
-          scale: interpolate(scrollOffset.value, [-HEADER_HEIGHT, 0, HEADER_HEIGHT], [2, 1, 1]),
-        },
+        { translateY: typeof translateY === 'number' ? translateY : 0 },
+        { scale: typeof scale === 'number' ? scale : 1 },
       ],
     };
   });
 
   return (
     <Animated.ScrollView
-      ref={scrollRef}
-      style={{ backgroundColor, flex: 1 }}
-      scrollEventThrottle={16}>
+      onScroll={scrollHandler}
+      scrollEventThrottle={16}
+      style={{ backgroundColor, flex: 1 }}>
       <Animated.View
         style={[
           styles.header,

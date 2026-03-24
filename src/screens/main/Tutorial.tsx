@@ -14,15 +14,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { supabase, safeQuery } from '@/integrations/supabase/client';
 import { Play, BookOpen } from 'lucide-react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import LinearGradient from 'react-native-linear-gradient';
 import { ScreenHeader } from '@/components/common/ScreenHeader';
 import { useTheme } from '@/contexts/ThemeContext';
 import { spacing, borderRadius } from '@/theme/spacing';
 import { getTypographyStyles } from '@/theme/typography';
 import { Text } from '@/components/common/Text';
 
-const REKTO_PURPLE_START = '#7B5CFF';
-const REKTO_PURPLE_END = '#5E3BEE';
+const REKTO_PURPLE_START = '#7C3AED';
+const REKTO_PURPLE_END = '#9333EA';
 
 interface Tutorial {
   id: string;
@@ -241,6 +241,12 @@ export function Tutorial() {
     return () => supabase.removeChannel(channel);
   }, [fetchTutorials]);
 
+  // Auto-refresh tutorials every 3 min when screen is mounted
+  useEffect(() => {
+    const interval = setInterval(fetchTutorials, 180000);
+    return () => clearInterval(interval);
+  }, [fetchTutorials]);
+
   const handleTutorialPress = async (tutorial: Tutorial) => {
     const normalizedUrl = normalizeVideoUrl(tutorial.video_url);
     if (!normalizedUrl) {
@@ -320,7 +326,7 @@ export function Tutorial() {
         </View>
       ) : (
         <FlatList
-          data={tutorials}
+          data={tutorials || []}
           renderItem={renderItem}
           keyExtractor={keyExtractor}
           contentContainerStyle={styles.listContent}
@@ -399,6 +405,8 @@ const createStyles = (colors: any, insets: any, typography: any, isRTL?: boolean
       marginTop: 14,
       paddingHorizontal: spacing.md,
       color: colors.foreground.DEFAULT,
+      textAlign: isRTL ? 'right' : 'left',
+      writingDirection: isRTL ? 'rtl' : 'ltr',
     },
     cardDescription: {
       fontSize: 14,
@@ -406,11 +414,14 @@ const createStyles = (colors: any, insets: any, typography: any, isRTL?: boolean
       marginTop: 6,
       paddingHorizontal: spacing.md,
       lineHeight: 20,
+      textAlign: isRTL ? 'right' : 'left',
+      writingDirection: isRTL ? 'rtl' : 'ltr',
     },
     watchButton: {
+      alignSelf: 'stretch',
+      width: '100%',
       height: 44,
       borderRadius: 14,
-      marginHorizontal: spacing.md,
       marginTop: spacing.md,
       marginBottom: spacing.md,
       justifyContent: 'center',
@@ -439,6 +450,7 @@ const createStyles = (colors: any, insets: any, typography: any, isRTL?: boolean
       ...typography.bodySmall,
       fontSize: 14,
       color: colors.foreground.muted,
-      textAlign: 'center',
+      textAlign: 'right',
+      writingDirection: 'rtl',
     },
   });

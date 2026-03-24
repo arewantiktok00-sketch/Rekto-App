@@ -28,13 +28,13 @@ export const AdminsTab: React.FC<AdminsTabProps> = ({ colors, t }) => {
       });
 
       if (error || data?.error) {
-        toast.error('Error', 'Could not load admins. Please try again.');
+        toast.error(t('error'), t('couldNotLoadAdmins'));
         return;
       }
 
       setAdmins(data?.admins || []);
     } catch {
-      toast.error('Error', 'Could not load admins. Please try again.');
+      toast.error(t('error'), t('couldNotLoadAdmins'));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -52,7 +52,7 @@ export const AdminsTab: React.FC<AdminsTabProps> = ({ colors, t }) => {
 
   const handleAddAdmin = async () => {
     if (!newAdminEmail.trim() || !newAdminEmail.includes('@')) {
-      toast.warning('Invalid email', 'Please enter a valid email address.');
+      toast.warning(t('invalidEmail'), t('pleaseEnterValidEmail'));
       return;
     }
 
@@ -63,16 +63,15 @@ export const AdminsTab: React.FC<AdminsTabProps> = ({ colors, t }) => {
       });
 
       if (error || data?.error) {
-        toast.error('Error', 'Could not add admin. Please try again.');
+        toast.error(t('error'), t('couldNotAddAdmin'));
         return;
       }
 
-      // Success
-      toast.success('Success', 'Admin added successfully!');
+      toast.success(t('success'), t('adminAddedSuccessfully'));
       setNewAdminEmail('');
-      fetchAdmins(); // Refresh the list
+      fetchAdmins();
     } catch {
-      toast.error('Error', 'Could not add admin. Please try again.');
+      toast.error(t('error'), t('couldNotAddAdmin'));
     } finally {
       setIsAdding(false);
     }
@@ -82,19 +81,19 @@ export const AdminsTab: React.FC<AdminsTabProps> = ({ colors, t }) => {
     const isSelf = email?.toLowerCase() === user?.email?.toLowerCase();
 
     if (isSelf) {
-      toast.warning('Not allowed', 'You cannot remove yourself. Ask another admin.');
+      toast.warning(t('notAllowed'), t('cannotRemoveYourself'));
       return;
     }
 
     if (admins.length <= 1) {
-      toast.warning('Not allowed', 'At least one admin must remain.');
+      toast.warning(t('notAllowed'), t('atLeastOneAdminMustRemain'));
       return;
     }
 
-    Alert.alert('Remove Admin', `Remove ${email}?`, [
-      { text: 'Cancel', style: 'cancel' },
+    Alert.alert(t('removeAdmin'), `${email}?`, [
+      { text: t('cancel'), style: 'cancel' },
       {
-        text: 'Remove',
+        text: t('remove'),
         style: 'destructive',
         onPress: async () => {
           try {
@@ -105,16 +104,16 @@ export const AdminsTab: React.FC<AdminsTabProps> = ({ colors, t }) => {
             if (error || data?.error) {
               const message =
                 data?.error === 'cannot_remove_last_admin'
-                  ? 'At least one admin must remain.'
-                  : 'Could not remove admin. Please try again.';
-              toast.error('Error', message);
+                  ? t('atLeastOneAdminMustRemain')
+                  : t('couldNotRemoveAdmin');
+              toast.error(t('error'), message);
               return;
             }
 
-            toast.success('Success', 'Admin removed successfully.');
+            toast.success(t('success'), t('adminRemovedSuccessfully'));
             fetchAdmins();
           } catch {
-            toast.error('Error', 'Could not remove admin. Please try again.');
+            toast.error(t('error'), t('couldNotRemoveAdmin'));
           }
         }
       }
@@ -208,12 +207,8 @@ export const AdminsTab: React.FC<AdminsTabProps> = ({ colors, t }) => {
               const isSelf = admin.email?.toLowerCase() === user?.email?.toLowerCase();
               const createdAt = admin.created_at ? new Date(admin.created_at) : null;
               const formattedDate = createdAt
-                ? createdAt.toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric',
-                  })
-                : 'Unknown';
+                ? `${String(createdAt.getDate()).padStart(2, '0')}/${String(createdAt.getMonth() + 1).padStart(2, '0')}/${createdAt.getFullYear()}`
+                : t('na');
 
               return (
                 <View key={admin.id} style={styles.adminCard}>

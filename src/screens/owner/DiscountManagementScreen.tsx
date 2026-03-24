@@ -11,11 +11,12 @@ import { getTypographyStyles } from '@/theme/typography';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from '@/components/common/Text';
 import { inputStyleRTL } from '@/utils/rtl';
+import { formatDateNumericDMY } from '@/utils/dateFormat';
 
 export function DiscountManagementScreen() {
   const insets = useSafeAreaInsets();
   const colors = getOwnerColors();
-  const { language } = useLanguage();
+  const { language, t } = useLanguage();
   const typography = getTypographyStyles(language as 'ckb' | 'ar');
   const styles = createStyles(colors, insets, typography);
   
@@ -80,7 +81,7 @@ export function DiscountManagementScreen() {
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token;
       if (!token) {
-        Alert.alert('Error', 'Not signed in. Please log in as an owner.');
+        Alert.alert(t('error'), t('notSignedInPleaseLoginAsOwner'));
         return;
       }
 
@@ -101,16 +102,16 @@ export function DiscountManagementScreen() {
       });
 
       if (error || data?.error) {
-        const msg = (data?.error as string) || error?.message || 'Failed to save. Make sure you are logged in as an owner.';
+        const msg = (data?.error as string) || error?.message || t('notSignedInPleaseLoginAsOwner');
         if (__DEV__) console.log('[Discount] save error:', { error, dataError: data?.error });
-        Alert.alert('Error', msg);
+        Alert.alert(t('error'), msg);
       } else {
         setDiscountEnabled(discountEnabledTemp);
-        Alert.alert('Success', 'Discount setting saved');
+        Alert.alert(t('success'), t('discountSettingSaved'));
       }
     } catch (error) {
       if (__DEV__) console.error('Failed to save discount setting:', error);
-      Alert.alert('Error', 'Failed to save discount setting');
+      Alert.alert(t('error'), t('failedToSaveDiscountSetting'));
     } finally {
       setIsSavingDiscount(false);
     }
@@ -161,7 +162,7 @@ export function DiscountManagementScreen() {
 
   const addDiscountCode = async () => {
     if (!newCode.trim() || !discountValue.trim()) {
-      Alert.alert('Error', 'Please fill in code and value');
+      Alert.alert(t('error'), t('pleaseFillCodeAndValue'));
       return;
     }
 
@@ -182,7 +183,7 @@ export function DiscountManagementScreen() {
       });
 
       if (error || data?.error) {
-        Alert.alert('Error', data?.error || 'Failed to add code');
+        toast.error(t('error'), t('failedToAddCode'));
       } else {
         const codeValue = newCode.trim().toUpperCase();
         const discountVal = Number(discountValue) || 0;
@@ -191,13 +192,12 @@ export function DiscountManagementScreen() {
         setDiscountValue('');
         setExpiresAt(null);
         fetchData();
-        Alert.alert('Success', 'Discount code added');
+        Alert.alert(t('success'), t('discountCodeAdded'));
         
-        // Send notification after successful creation
         await sendDiscountNotification(codeValue, discountType, discountVal);
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to add code');
+      Alert.alert(t('error'), t('failedToAddCode'));
     } finally {
       setIsAdding(false);
     }
@@ -212,13 +212,12 @@ export function DiscountManagementScreen() {
       });
       
       if (error || data?.error) {
-        Alert.alert('Error', data?.error || 'Failed to toggle code');
+        toast.error(t('error'), t('failedToToggleCode'));
         return;
       }
       
       fetchData();
       
-      // Send notification when code is activated (not when deactivated)
       if (isActive) {
         const code = codes.find(c => c.id === codeId);
         if (code) {
@@ -226,15 +225,15 @@ export function DiscountManagementScreen() {
         }
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to toggle code');
+      Alert.alert(t('error'), t('failedToToggleCode'));
     }
   };
 
   const deleteCode = async (codeId: string) => {
-    Alert.alert('Delete Code', 'Are you sure?', [
-      { text: 'Cancel', style: 'cancel' },
+    Alert.alert(t('deleteCode'), t('areYouSure'), [
+      { text: t('cancel'), style: 'cancel' },
       {
-        text: 'Delete',
+        text: t('delete'),
         style: 'destructive',
         onPress: async () => {
           try {
@@ -245,7 +244,7 @@ export function DiscountManagementScreen() {
             });
             fetchData();
           } catch (error) {
-            Alert.alert('Error', 'Failed to delete code');
+            Alert.alert(t('error'), t('failedToDeleteCode'));
           }
         }
       }
@@ -254,7 +253,7 @@ export function DiscountManagementScreen() {
 
   const sendBroadcast = async () => {
     if (!broadcastTitle.trim() || !broadcastMessage.trim()) {
-      Alert.alert('Error', 'Please fill in title and message');
+      Alert.alert(t('error'), t('pleaseFillTitleAndMessage'));
       return;
     }
 
@@ -270,11 +269,12 @@ export function DiscountManagementScreen() {
         headers: { Authorization: `Bearer ${session?.session?.access_token}` }
       });
 
-      Alert.alert('Sent', `Notification sent to ${data?.sent_count || 0} users`);
+      const count = data?.sent_count || 0;
+      Alert.alert(t('sent'), t('notificationSentToUsers').replace('{{count}}', String(count)));
       setBroadcastTitle('');
       setBroadcastMessage('');
     } catch (error) {
-      Alert.alert('Error', 'Failed to send broadcast');
+      Alert.alert(t('error'), t('failedToSendBroadcast'));
     } finally {
       setIsBroadcasting(false);
     }
@@ -292,11 +292,11 @@ export function DiscountManagementScreen() {
       </View>
       <Text style={styles.codeDetails}>
         {item.discount_type === 'percentage' ? `${item.discount_value}% off` : `$${item.discount_value} off`}
-        {item.expires_at ? ` • Expires: ${new Date(item.expires_at).toLocaleDateString()}` : ''}
+        {item.expires_at ? ` • ${t('expires')}: ${formatDateNumericDMY(new Date(item.expires_at))}` : ''}
       </Text>
-      <Text style={styles.usageText}>Used {item.usage_count} times</Text>
+      <Text style={styles.usageText}>{t('usedTimes', { count: item.usage_count })}</Text>
       <TouchableOpacity onPress={() => deleteCode(item.id)}>
-        <Text style={styles.deleteText}>Delete</Text>
+        <Text style={styles.deleteText}>{t('delete')}</Text>
       </TouchableOpacity>
     </View>
   );
@@ -315,14 +315,14 @@ export function DiscountManagementScreen() {
       contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}
       ListHeaderComponent={
         <>
-          <Text style={styles.title}>Discount Management</Text>
+          <Text style={styles.title}>{t('discountManagement')}</Text>
 
           {/* Global Toggle */}
           <View style={styles.card}>
             <View style={styles.toggleCard}>
               <View style={styles.toggleContent}>
-                <Text style={styles.toggleLabel}>Discount System</Text>
-                <Text style={styles.toggleHint}>Enable discount codes in Create Ad</Text>
+                <Text style={styles.toggleLabel}>{t('discountSystem')}</Text>
+                <Text style={styles.toggleHint}>{t('enableDiscountCodesInCreateAd')}</Text>
               </View>
               <Switch
                 value={discountEnabledTemp}
@@ -340,7 +340,7 @@ export function DiscountManagementScreen() {
                 {isSavingDiscount ? (
                   <ActivityIndicator size="small" color={colors.primary.foreground} />
                 ) : (
-                  <Text style={styles.saveDiscountButtonText}>Save Discount Setting</Text>
+                  <Text style={styles.saveDiscountButtonText}>{t('saveDiscountSetting')}</Text>
                 )}
               </TouchableOpacity>
             )}
@@ -348,7 +348,7 @@ export function DiscountManagementScreen() {
 
           {/* Add New Code */}
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Add New Code</Text>
+            <Text style={styles.cardTitle}>{t('addNewCode')}</Text>
             <TextInput
               style={[styles.input, inputStyleRTL()]}
               placeholder="CODE123"
@@ -365,13 +365,13 @@ export function DiscountManagementScreen() {
                   style={styles.picker}
                   dropdownIconColor="#FAFAFA"
                 >
-                  <Picker.Item label="Percentage (%)" value="percentage" />
-                  <Picker.Item label="Fixed ($)" value="fixed" />
+                  <Picker.Item label={t('percentageLabel')} value="percentage" />
+                  <Picker.Item label={t('fixedLabel')} value="fixed" />
                 </Picker>
               </View>
               <TextInput
                 style={[styles.input, { flex: 1 }, inputStyleRTL()]}
-                placeholder="Value"
+                placeholder={t('valuePlaceholder')}
                 placeholderTextColor="#6B7280"
                 value={discountValue}
                 onChangeText={setDiscountValue}
@@ -383,22 +383,25 @@ export function DiscountManagementScreen() {
               onPress={() => setShowDatePicker(true)}
             >
               <Text style={styles.dateButtonText}>
-                {expiresAt ? `Expires: ${expiresAt.toLocaleDateString()}` : 'Set Expiry Date (Optional)'}
+                {expiresAt ? `${t('expires')}: ${formatDateNumericDMY(expiresAt)}` : t('setExpiryDateOptional')}
               </Text>
             </TouchableOpacity>
             {showDatePicker && (
-              <DateTimePicker
-                value={expiresAt || new Date()}
-                mode="date"
-                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                minimumDate={new Date()}
-                onChange={(event, date) => {
-                  setShowDatePicker(false);
-                  if (event.type === 'set' && date) {
-                    setExpiresAt(date);
-                  }
-                }}
-              />
+              <View style={styles.dateTimePickerContainer}>
+                <DateTimePicker
+                  value={expiresAt || new Date()}
+                  mode="date"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  minimumDate={new Date()}
+                  onChange={(event, date) => {
+                    setShowDatePicker(false);
+                    if (event.type === 'set' && date) {
+                      setExpiresAt(date);
+                    }
+                  }}
+                  style={Platform.OS === 'ios' ? styles.dateTimePickerWheel : undefined}
+                />
+              </View>
             )}
             <TouchableOpacity
               style={[styles.addButton, isAdding && styles.addButtonDisabled]}
@@ -408,7 +411,7 @@ export function DiscountManagementScreen() {
               {isAdding ? (
                 <ActivityIndicator size="small" color={colors.primary.foreground} />
               ) : (
-                <Text style={styles.addButtonText}>Add Code</Text>
+                <Text style={styles.addButtonText}>{t('addCode')}</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -416,17 +419,17 @@ export function DiscountManagementScreen() {
           {/* Broadcast Section */}
           {discountEnabled && (
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Broadcast Notification</Text>
+              <Text style={styles.cardTitle}>{t('broadcastNotificationCard')}</Text>
 <TextInput
               style={[styles.input, inputStyleRTL()]}
-              placeholder="Notification Title"
+              placeholder={t('notificationTitlePlaceholder')}
                 placeholderTextColor="#6B7280"
                 value={broadcastTitle}
                 onChangeText={setBroadcastTitle}
               />
 <TextInput
               style={[styles.input, styles.textArea, inputStyleRTL()]}
-              placeholder="Message"
+              placeholder={t('messagePlaceholder')}
                 placeholderTextColor="#6B7280"
                 value={broadcastMessage}
                 onChangeText={setBroadcastMessage}
@@ -441,20 +444,20 @@ export function DiscountManagementScreen() {
                 {isBroadcasting ? (
                   <ActivityIndicator size="small" color={colors.primary.foreground} />
                 ) : (
-                  <Text style={styles.addButtonText}>Send to All Users</Text>
+                  <Text style={styles.addButtonText}>{t('sendToAllUsers')}</Text>
                 )}
               </TouchableOpacity>
             </View>
           )}
 
-          <Text style={styles.sectionTitle}>Active Codes</Text>
+          <Text style={styles.sectionTitle}>{t('activeCodes')}</Text>
         </>
       }
       data={codes}
       keyExtractor={(item) => item.id}
       renderItem={renderCodeItem}
       ListEmptyComponent={
-        <Text style={styles.emptyText}>No discount codes yet</Text>
+        <Text style={styles.emptyText}>{t('noDiscountCodesYet')}</Text>
       }
     />
   );
@@ -637,5 +640,16 @@ const createStyles = (colors: any, insets: any, typography: any) => StyleSheet.c
     fontFamily: 'Poppins-Regular', 
     textAlign: 'center', 
     marginTop: 24 
+  },
+  dateTimePickerContainer: {
+    backgroundColor: colors.card?.background ?? colors.input?.background ?? '#FFFFFF',
+    borderRadius: 16,
+    padding: 16,
+    overflow: 'hidden',
+    maxHeight: 300,
+    marginTop: 8,
+  },
+  dateTimePickerWheel: {
+    height: 200,
   },
 });

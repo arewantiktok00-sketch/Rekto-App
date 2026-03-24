@@ -5,8 +5,7 @@ import { getOwnerColors } from '@/theme/colors';
 import { borderRadius, spacing } from '@/theme/spacing';
 import { inputStyleRTL } from '@/utils/rtl';
 import { toast } from '@/utils/toast';
-import { Image } from 'expo-image';
-import { Video } from 'expo-av';
+import Video from 'react-native-video';
 import {
     AlertCircle,
     Calendar,
@@ -29,9 +28,8 @@ import {
     Alert,
     Clipboard,
     FlatList,
-    KeyboardAvoidingView,
+    Image,
     Linking,
-    Modal,
     Platform,
     RefreshControl,
     ScrollView,
@@ -41,6 +39,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
+import { CenterModal } from '@/components/common/CenterModal';
 import { AdvertiserSelector } from './AdvertiserSelector';
 
 interface PendingCampaign {
@@ -66,7 +65,7 @@ interface PendingCampaign {
   payment_transaction_id: string | null;
   payment_method_used: string | null;
   payment_amount_iqd: string | null;
-  extension_status?: 'awaiting_payment' | 'verifying_payment' | null;
+  extension_status?: 'awaiting_payment' | 'verifying_payment' | 'processing' | null;
   extension_days?: number | null;
   extension_daily_budget?: number | null;
   extension_payment_method?: string | null;
@@ -80,7 +79,12 @@ interface VideoInfo {
   videoDescription?: string | null;
 }
 
-export const AdReviewQueue: React.FC = () => {
+interface AdReviewQueueProps {
+  /** Optional: when provided, auto-expand this campaign row (used from owner notifications). */
+  highlightCampaignId?: string;
+}
+
+export const AdReviewQueue: React.FC<AdReviewQueueProps> = ({ highlightCampaignId }) => {
   const { t, language, isRTL } = useLanguage();
   const colors = getOwnerColors();
   const styles = createStyles(colors);
@@ -100,12 +104,6 @@ export const AdReviewQueue: React.FC = () => {
   const [videoErrorById, setVideoErrorById] = useState<Record<string, string | null>>({});
   const realtimeRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const SUPABASE_URL = 'https://uivgyexyakfincwgghgh.supabase.co';
-
-  useEffect(() => {
-    fetchPendingCampaigns();
-  }, []);
-
   const fetchVideoInfo = async (campaign: PendingCampaign) => {
     if (!campaign?.id || !campaign.video_url) return;
     if (videoLoadingById[campaign.id] || videoInfoById[campaign.id]) return;
@@ -114,26 +112,13 @@ export const AdReviewQueue: React.FC = () => {
       setVideoLoadingById((prev) => ({ ...prev, [campaign.id]: true }));
       setVideoErrorById((prev) => ({ ...prev, [campaign.id]: null }));
 
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
-      const response = await fetch(`${SUPABASE_URL}/functions/v1/tiktok-video-info`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
+      const { data, error } = await supabase.functions.invoke('tiktok-video-info', {
+        body: {
           authCode: campaign.video_url,
           campaignId: campaign.id,
-        }),
+        },
       });
-
-      if (!response.ok) {
-        throw new Error('Failed to load video info');
-      }
-
-      const data = await response.json();
+      if (error) throw error;
       const info: VideoInfo | null = data?.videoInfo || null;
       setVideoInfoById((prev) => ({ ...prev, [campaign.id]: info }));
     } catch (err: any) {
@@ -153,43 +138,41 @@ export const AdReviewQueue: React.FC = () => {
 
   const fetchPendingCampaigns = useCallback(async () => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
       setErrorMessage(null);
 
-      const response = await fetch(`${SUPABASE_URL}/functions/v1/admin-review`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ action: 'list' }),
+      const { data, error } = await supabase.functions.invoke('admin-review', {
+        body: { action: 'list' },
       });
-
-      if (response.status === 404) {
-        console.error('[AdReviewQueue] admin-review function not deployed');
+      if (error) {
+        console.error('[AdReviewQueue] admin-review invoke error:', error);
         setCampaigns([]);
-        setErrorMessage('Backend function not deployed. Contact admin.');
+        setErrorMessage(t('backendNotDeployed'));
         return;
       }
-
-      if (!response.ok) {
-        throw new Error('Failed to load pending ads');
-      }
-
-      const data = await response.json();
       setCampaigns(data?.campaigns || []);
       // Backend (admin-review list) should include for extension approval: extension_status, extension_days, extension_daily_budget, extension_payment_method
     } catch (err: any) {
       console.error('Failed to fetch pending campaigns:', err);
-      setErrorMessage(err?.message || 'Network error. Please retry.');
-      toast.error('Error', 'Something went wrong');
+      setErrorMessage(err?.message || t('networkErrorRetry'));
+      toast.error(t('error'), t('somethingWentWrong'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
+
+  useEffect(() => {
+    fetchPendingCampaigns();
+  }, [fetchPendingCampaigns]);
+
+  // When coming from a specific campaign (owner notification), auto-expand it once campaigns load.
+  useEffect(() => {
+    if (!highlightCampaignId || campaigns.length === 0) return;
+    const exists = campaigns.some((c) => c.id === highlightCampaignId);
+    if (exists) {
+      setExpandedId((current) => current || highlightCampaignId);
+    }
+  }, [highlightCampaignId, campaigns]);
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
@@ -230,17 +213,17 @@ export const AdReviewQueue: React.FC = () => {
 
       if (error) {
         console.error('[admin-review] accept-content SDK error:', error);
-        Alert.alert('Error', 'Network error. Please check your connection and try again.');
+        Alert.alert(t('error'), t('networkErrorRetry'));
         return;
       }
       if (!data?.success) {
-        const errorMsg = data?.error || 'Unknown error';
+        const errorMsg = t('somethingWentWrong');
         console.error('[admin-review] accept-content business error:', errorMsg);
-        Alert.alert('Action Failed', errorMsg);
+        Alert.alert(t('actionFailed'), errorMsg);
         return;
       }
 
-      toast.success('Success', data?.message || 'Operation completed');
+      toast.success(t('success'), data?.message || t('operationCompleted'));
       await sendPushToCampaignUser(
         campaignId,
         t('pushAwaitingPaymentTitle') || 'Awaiting payment',
@@ -250,7 +233,7 @@ export const AdReviewQueue: React.FC = () => {
       fetchPendingCampaigns();
     } catch (err: any) {
       console.error('[admin-review] accept-content unexpected error:', err);
-      Alert.alert('Error', 'Something went wrong. Please try again.');
+      Alert.alert(t('error'), t('somethingWentWrong'));
     } finally {
       setProcessingId(null);
     }
@@ -259,7 +242,7 @@ export const AdReviewQueue: React.FC = () => {
   const handleVerifyAndRun = async (campaign: PendingCampaign) => {
     const selectedAdvertiserId = selectedAdvertisers[campaign.id];
     if (!selectedAdvertiserId) {
-      toast.error('Error', 'Something went wrong');
+      toast.error(t('error'), t('somethingWentWrong'));
       return;
     }
 
@@ -289,17 +272,17 @@ export const AdReviewQueue: React.FC = () => {
 
       if (error) {
         console.error('[admin-review] verify-and-run SDK error:', error);
-        Alert.alert('Error', 'Network error. Please check your connection and try again.');
+        Alert.alert(t('error'), t('networkErrorRetry'));
         return;
       }
       if (!data?.success) {
-        const errorMsg = data?.error || 'Unknown error';
+        const errorMsg = t('somethingWentWrong');
         console.error('[admin-review] verify-and-run business error:', errorMsg);
-        Alert.alert('Action Failed', errorMsg);
+        Alert.alert(t('actionFailed'), errorMsg);
         return;
       }
 
-      toast.success('Success', data?.message || 'Operation completed');
+      toast.success(t('success'), data?.message || t('operationCompleted'));
       await sendPushToCampaignUser(
         campaign.id,
         t('pushAdSubmittedTitle') || 'Ad Submitted! 🚀',
@@ -312,7 +295,7 @@ export const AdReviewQueue: React.FC = () => {
       fetchPendingCampaigns();
     } catch (err: any) {
       console.error('[admin-review] verify-and-run unexpected error:', err);
-      Alert.alert('Error', 'Something went wrong. Please try again.');
+      Alert.alert(t('error'), t('somethingWentWrong'));
     } finally {
       setProcessingId(null);
     }
@@ -320,12 +303,12 @@ export const AdReviewQueue: React.FC = () => {
 
   const handleInvalidId = async (campaignId: string) => {
     Alert.alert(
-      'Invalid Payment ID',
-      'This will revert the campaign to awaiting payment. The user will need to re-enter payment details.',
+      t('invalidPaymentId'),
+      t('invalidPaymentIdMessage'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('cancel'), style: 'cancel' },
         {
-          text: 'Confirm',
+          text: t('confirm'),
           style: 'destructive',
           onPress: async () => {
             setProcessingId(campaignId);
@@ -336,20 +319,20 @@ export const AdReviewQueue: React.FC = () => {
 
               if (error) {
                 console.error('[admin-review] invalid-id SDK error:', error);
-                Alert.alert('Error', 'Network error. Please check your connection and try again.');
+                Alert.alert(t('error'), t('networkErrorRetry'));
                 return;
               }
               if (!data?.success) {
-                const errorMsg = data?.error || 'Unknown error';
+                const errorMsg = t('somethingWentWrong');
                 console.error('[admin-review] invalid-id business error:', errorMsg);
-                Alert.alert('Action Failed', errorMsg);
+                Alert.alert(t('actionFailed'), errorMsg);
                 return;
               }
-              toast.success('Success', data?.message || 'Operation completed');
+              toast.success(t('success'), data?.message || t('operationCompleted'));
               fetchPendingCampaigns();
             } catch (err: any) {
               console.error('[admin-review] invalid-id unexpected error:', err);
-              Alert.alert('Error', 'Something went wrong. Please try again.');
+              Alert.alert(t('error'), t('somethingWentWrong'));
             } finally {
               setProcessingId(null);
             }
@@ -367,27 +350,28 @@ export const AdReviewQueue: React.FC = () => {
       });
       if (error) {
         console.error('[admin-review] verify-extension SDK error:', error);
-        Alert.alert('Extension Failed', 'Network error. Please check your connection and try again.');
+        Alert.alert(t('extensionFailed'), t('networkErrorRetry'));
         return;
       }
       if (!data?.success) {
-        const errorMsg = (data?.error || data?.message || 'Failed to verify extension').trim();
-        console.error('[admin-review] verify-extension business error:', errorMsg);
-        const lower = errorMsg.toLowerCase();
+        const backendMsg = typeof data?.message === 'string' ? data.message : (typeof data?.error === 'string' ? data.error : null);
+        const displayMsg = backendMsg ? String(backendMsg) : t('somethingWentWrong');
+        const lower = displayMsg.toLowerCase();
         if (lower.includes('deleted')) {
-          Alert.alert('Extension Failed', 'This campaign was deleted on TikTok. Extension cannot proceed.');
+          Alert.alert(t('extensionFailed'), t('campaignDeletedOnTikTok'));
         } else if (lower.includes('not active') || lower.includes('paused') || lower.includes('inactive')) {
-          Alert.alert('Extension Failed', 'This ad is paused or inactive on TikTok. Resume it first.');
+          Alert.alert(t('extensionFailed'), t('adPausedOrInactive'));
         } else {
-          Alert.alert('Extension Failed', errorMsg);
+          Alert.alert(t('extensionFailed'), displayMsg);
         }
+        setProcessingId(null);
         return;
       }
-      toast.success('Success', data?.message || 'Extension approved');
+      toast.success(t('success'), data?.message || t('extensionApproved'));
       fetchPendingCampaigns();
     } catch (err: any) {
       console.error('[admin-review] verify-extension unexpected error:', err);
-      Alert.alert('Extension Failed', 'The campaign may have been deleted or paused on TikTok.');
+      Alert.alert(t('extensionFailed'), t('somethingWentWrong'));
     } finally {
       setProcessingId(null);
     }
@@ -395,12 +379,12 @@ export const AdReviewQueue: React.FC = () => {
 
   const handleRejectExtension = async (campaign: PendingCampaign) => {
     Alert.alert(
-      'Reject Extension',
-      'Reject this extension request? The user will be notified.',
+      t('rejectExtension'),
+      t('rejectExtensionConfirm'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('cancel'), style: 'cancel' },
         {
-          text: 'Reject',
+          text: t('rejectExtensionBtn'),
           style: 'destructive',
           onPress: async () => {
             setProcessingId(campaign.id);
@@ -410,20 +394,20 @@ export const AdReviewQueue: React.FC = () => {
               });
               if (error) {
                 console.error('[admin-review] reject-extension SDK error:', error);
-                Alert.alert('Error', 'Network error. Please check your connection and try again.');
+                Alert.alert(t('error'), t('networkErrorRetry'));
                 return;
               }
               if (!data?.success) {
-                const errorMsg = data?.error || data?.message || 'Failed to reject extension. Please try again.';
+                const errorMsg = t('somethingWentWrong');
                 console.error('[admin-review] reject-extension business error:', errorMsg);
-                Alert.alert('Error', errorMsg);
+                Alert.alert(t('error'), errorMsg);
                 return;
               }
-              toast.success('Success', data?.message || 'Extension rejected');
+              toast.success(t('success'), data?.message || t('extensionRejected'));
               fetchPendingCampaigns();
             } catch (err: any) {
               console.error('[admin-review] reject-extension unexpected error:', err);
-              Alert.alert('Error', 'Failed to reject extension. Please try again.');
+              Alert.alert(t('error'), t('extensionFailed'));
             } finally {
               setProcessingId(null);
             }
@@ -436,7 +420,7 @@ export const AdReviewQueue: React.FC = () => {
   const handleReject = async () => {
     if (!rejectingCampaignId) return;
     if (!rejectionReason.trim()) {
-      toast.error('Error', 'Something went wrong');
+      toast.error(t('error'), t('somethingWentWrong'));
       return;
     }
 
@@ -452,17 +436,17 @@ export const AdReviewQueue: React.FC = () => {
 
       if (error) {
         console.error('[admin-review] reject SDK error:', error);
-        Alert.alert('Error', 'Network error. Please check your connection and try again.');
+        Alert.alert(t('error'), t('networkErrorRetry'));
         return;
       }
       if (!data?.success) {
-        const errorMsg = data?.error || 'Unknown error';
+        const errorMsg = t('somethingWentWrong');
         console.error('[admin-review] reject business error:', errorMsg);
-        Alert.alert('Action Failed', errorMsg);
+        Alert.alert(t('actionFailed'), errorMsg);
         return;
       }
 
-      toast.success('Success', data?.message || 'Operation completed');
+      toast.success(t('success'), data?.message || t('operationCompleted'));
       const reason = rejectionReason.trim();
       await sendPushToCampaignUser(
         rejectingCampaignId,
@@ -476,7 +460,7 @@ export const AdReviewQueue: React.FC = () => {
       fetchPendingCampaigns();
     } catch (err: any) {
       console.error('[admin-review] reject unexpected error:', err);
-      Alert.alert('Error', 'Something went wrong. Please try again.');
+      Alert.alert(t('error'), t('somethingWentWrong'));
     } finally {
       setProcessingId(null);
     }
@@ -484,25 +468,25 @@ export const AdReviewQueue: React.FC = () => {
 
   const copySparkCode = (code: string) => {
     Clipboard.setString(code);
-    toast.success('Success', 'Operation completed');
+    toast.success(t('success'), t('operationCompleted'));
   };
 
   const getStatusBadge = (status: string) => {
     if (status === 'waiting_for_admin') {
-      return { label: 'Pending Content Review', color: '#F59E0B', bg: '#FEF3C7' };
+      return { label: t('pendingContentReview'), color: '#F59E0B', bg: '#FEF3C7' };
     }
     if (status === 'verifying_payment') {
-      return { label: 'Verify Payment', color: '#3B82F6', bg: '#DBEAFE' };
+      return { label: t('verifyPayment'), color: '#3B82F6', bg: '#DBEAFE' };
     }
     if (status === 'active') {
-      return { label: 'Active (Extension)', color: '#7C3AED', bg: '#EDE9FE' };
+      return { label: t('activeExtension'), color: '#7C3AED', bg: '#EDE9FE' };
     }
     return { label: status, color: '#6B7280', bg: '#F3F4F6' };
   };
 
   const renderCampaignCard = ({ item }: { item: PendingCampaign }) => {
     const isExpanded = expandedId === item.id;
-    const isProcessing = processingId === item.id;
+    const isProcessing = processingId === item.id || item.extension_status === 'processing';
     const statusBadge = getStatusBadge(item.status);
     const selectedAdvertiserId = selectedAdvertisers[item.id];
     const videoInfo = videoInfoById[item.id];
@@ -542,7 +526,7 @@ export const AdReviewQueue: React.FC = () => {
           <ScrollView style={styles.cardContent} nestedScrollEnabled>
             {/* Campaign Details */}
             <View style={styles.detailSection}>
-              <Text style={styles.detailLabel}>Video URL (Spark Code)</Text>
+              <Text style={styles.detailLabel}>{t('videoUrlSparkCode')}</Text>
               <View style={styles.sparkCodeContainer}>
                 <Text style={styles.sparkCode} numberOfLines={1}>
                   {item.video_url || 'N/A'}
@@ -557,28 +541,28 @@ export const AdReviewQueue: React.FC = () => {
             </View>
 
             <View style={styles.detailSection}>
-              <Text style={styles.detailLabel}>Video Preview</Text>
+              <Text style={styles.detailLabel}>{t('videoPreview')}</Text>
               <View style={styles.videoPreviewContainer}>
                 {isVideoLoading ? (
                   <View style={styles.videoLoading}>
                     <ActivityIndicator size="small" color={colors.primary.DEFAULT} />
-                    <Text style={styles.videoLoadingText}>Loading preview...</Text>
+                    <Text style={styles.videoLoadingText}>{t('loadingPreview')}</Text>
                   </View>
                 ) : videoInfo?.previewUrl ? (
                   <Video
                     source={{ uri: videoInfo.previewUrl }}
                     style={styles.videoPreview}
                     resizeMode="contain"
-                    useNativeControls
-                    isLooping
+                    controls
+                    repeat
                   />
                 ) : videoInfo?.coverImageUrl ? (
-                  <Image source={{ uri: videoInfo.coverImageUrl }} style={styles.videoPreview} contentFit="cover" />
+                  <Image source={{ uri: videoInfo.coverImageUrl }} style={styles.videoPreview} resizeMode="cover" />
                 ) : (
                   <View style={styles.videoPlaceholder}>
                     <Play size={28} color="#7C3AED" />
                     <Text style={styles.videoPlaceholderText}>
-                      {videoError ? 'Preview unavailable' : 'No preview yet'}
+                      {videoError ? t('previewUnavailable') : t('noPreviewYet')}
                     </Text>
                   </View>
                 )}
@@ -600,7 +584,7 @@ export const AdReviewQueue: React.FC = () => {
                   style={styles.tiktokButton}
                   onPress={() => Linking.openURL(videoInfo.tiktokUrl as string)}
                 >
-                  <Text style={styles.tiktokButtonText}>View on TikTok</Text>
+                  <Text style={styles.tiktokButtonText}>{t('viewOnTikTok')}</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -629,7 +613,7 @@ export const AdReviewQueue: React.FC = () => {
             {/* Payment Info (if verifying_payment) */}
             {item.status === 'verifying_payment' && (
               <View style={styles.paymentSection}>
-                <Text style={styles.sectionTitle}>Payment Information</Text>
+                <Text style={styles.sectionTitle}>{t('paymentInformation')}</Text>
                 {item.payment_method_used && (
                   <View style={styles.paymentInfo}>
                     <CreditCard size={16} color={colors.foreground.muted} />
@@ -671,7 +655,7 @@ export const AdReviewQueue: React.FC = () => {
                     ) : (
                       <>
                         <Check size={18} color={colors.primary.foreground} />
-                        <Text style={styles.actionButtonText}>Accept Content</Text>
+                        <Text style={styles.actionButtonText}>{t('acceptContent')}</Text>
                       </>
                     )}
                   </TouchableOpacity>
@@ -684,7 +668,7 @@ export const AdReviewQueue: React.FC = () => {
                     disabled={isProcessing}
                   >
                     <X size={18} color={colors.primary.foreground} />
-                    <Text style={styles.actionButtonText}>Reject</Text>
+                    <Text style={styles.actionButtonText}>{t('reject')}</Text>
                   </TouchableOpacity>
                 </>
               )}
@@ -717,7 +701,7 @@ export const AdReviewQueue: React.FC = () => {
                     ) : (
                       <>
                         <Play size={18} color={colors.primary.foreground} />
-                        <Text style={styles.actionButtonText}>Confirm & Run Ad</Text>
+                        <Text style={styles.actionButtonText}>{t('confirmRunAd')}</Text>
                       </>
                     )}
                   </TouchableOpacity>
@@ -727,7 +711,7 @@ export const AdReviewQueue: React.FC = () => {
                     disabled={isProcessing}
                   >
                     <AlertCircle size={18} color={colors.primary.foreground} />
-                    <Text style={styles.actionButtonText}>Invalid ID</Text>
+                    <Text style={styles.actionButtonText}>{t('invalidId')}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.actionButton, styles.rejectButton]}
@@ -738,7 +722,7 @@ export const AdReviewQueue: React.FC = () => {
                     disabled={isProcessing}
                   >
                     <X size={18} color={colors.primary.foreground} />
-                    <Text style={styles.actionButtonText}>Reject Ad</Text>
+                    <Text style={styles.actionButtonText}>{t('rejectAd')}</Text>
                   </TouchableOpacity>
                 </>
               )}
@@ -747,18 +731,18 @@ export const AdReviewQueue: React.FC = () => {
               {item.status === 'active' && (
                 <>
                   <View style={styles.paymentSection}>
-                    <Text style={styles.sectionTitle}>Extension Request</Text>
+                    <Text style={styles.sectionTitle}>{t('extensionRequest')}</Text>
                     {item.extension_days != null || item.extension_daily_budget != null ? (
                       <View style={styles.paymentInfo}>
                         <Calendar size={16} color={colors.foreground.muted} />
                         <Text style={styles.paymentText}>
-                          {item.extension_days != null ? `${item.extension_days} days` : ''}
-                          {item.extension_daily_budget != null ? ` • $${item.extension_daily_budget}/day` : ''}
+                          {item.extension_days != null ? `${item.extension_days} ${t('days')}` : ''}
+                          {item.extension_daily_budget != null ? ` • $${item.extension_daily_budget}/${t('day')}` : ''}
                           {item.extension_payment_method ? ` • ${item.extension_payment_method}` : ''}
                         </Text>
                       </View>
                     ) : (
-                      <Text style={styles.paymentText}>No extension details available</Text>
+                      <Text style={styles.paymentText}>{t('noExtensionDetails')}</Text>
                     )}
                   </View>
                   <TouchableOpacity
@@ -771,7 +755,7 @@ export const AdReviewQueue: React.FC = () => {
                     ) : (
                       <>
                         <Check size={20} color={colors.primary.foreground} />
-                        <Text style={styles.extensionButtonText}>Verify Extension</Text>
+                        <Text style={styles.extensionButtonText}>{t('verifyExtension')}</Text>
                       </>
                     )}
                   </TouchableOpacity>
@@ -781,7 +765,7 @@ export const AdReviewQueue: React.FC = () => {
                     disabled={isProcessing}
                   >
                     <X size={20} color={colors.primary.foreground} />
-                    <Text style={styles.extensionButtonText}>Reject Extension</Text>
+                    <Text style={styles.extensionButtonText}>{t('rejectExtensionBtn')}</Text>
                   </TouchableOpacity>
                 </>
               )}
@@ -796,7 +780,7 @@ export const AdReviewQueue: React.FC = () => {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={colors.primary.DEFAULT} />
-        <Text style={styles.loadingText}>Loading campaigns...</Text>
+        <Text style={styles.loadingText}>{t('loadingCampaigns')}</Text>
       </View>
     );
   }
@@ -806,7 +790,7 @@ export const AdReviewQueue: React.FC = () => {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>
-          Review Queue ({campaigns.length})
+          {t('reviewQueue', { count: campaigns.length })}
         </Text>
         <TouchableOpacity onPress={handleRefresh} disabled={refreshing}>
           <RefreshCw
@@ -821,7 +805,7 @@ export const AdReviewQueue: React.FC = () => {
       {campaigns.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>
-            {errorMessage || 'No ads waiting for review'}
+            {errorMessage || t('noAdsWaitingForReview')}
           </Text>
         </View>
       ) : (
@@ -837,59 +821,60 @@ export const AdReviewQueue: React.FC = () => {
         />
       )}
 
-      {/* Reject Dialog — KeyboardAvoidingView so input and buttons stay above keyboard */}
-      <Modal visible={showRejectDialog} animationType="slide" transparent>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={{ flex: 1, justifyContent: 'flex-end' }}
-        >
-          <View style={[styles.dialogOverlay, { flex: 1, justifyContent: 'flex-end' }]}>
-            <View style={[styles.dialog, { maxHeight: '80%' }]}>
-              <Text style={styles.dialogTitle}>Reject Campaign</Text>
-              <Text style={styles.dialogSubtitle}>
-                Please provide a reason for rejection:
-              </Text>
-              <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 160 }}>
-                <TextInput
-                  style={[styles.rejectionInput, inputStyleRTL()]}
-                  placeholder="Rejection reason..."
-                  value={rejectionReason}
-                  onChangeText={setRejectionReason}
-                  multiline
-                  numberOfLines={4}
-                  placeholderTextColor={colors.foreground.muted}
-                  textAlignVertical="top"
-                />
-              </ScrollView>
-              <View style={[styles.dialogActions, { marginTop: 16 }]}>
-                <TouchableOpacity
-                  style={[styles.dialogButton, styles.dialogButtonCancel]}
-                  onPress={() => {
-                    setShowRejectDialog(false);
-                    setRejectingCampaignId(null);
-                    setRejectionReason('');
-                  }}
-                >
-                  <Text style={styles.dialogButtonText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.dialogButton, styles.dialogButtonConfirm]}
-                  onPress={handleReject}
-                  disabled={!rejectionReason.trim() || processingId !== null}
-                >
-                  {processingId !== null ? (
-                    <ActivityIndicator size="small" color={colors.primary.foreground} />
-                  ) : (
-                    <Text style={[styles.dialogButtonText, { color: colors.primary.foreground }]}>
-                      Reject
-                    </Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </View>
+      {/* Reject Dialog — centered, keyboard-aware */}
+      <CenterModal
+        visible={showRejectDialog}
+        onRequestClose={() => {
+          setShowRejectDialog(false);
+          setRejectingCampaignId(null);
+          setRejectionReason('');
+        }}
+        keyboardAware
+      >
+        <View style={[styles.dialog, { maxHeight: '80%' }]}>
+          <Text style={styles.dialogTitle}>{t('rejectCampaign')}</Text>
+          <Text style={styles.dialogSubtitle}>
+            {t('pleaseProvideRejectionReason')}
+          </Text>
+          <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 160 }}>
+            <TextInput
+              style={[styles.rejectionInput, inputStyleRTL()]}
+              placeholder={t('rejectionReasonPlaceholder')}
+              value={rejectionReason}
+              onChangeText={setRejectionReason}
+              multiline
+              numberOfLines={4}
+              placeholderTextColor={colors.foreground.muted}
+              textAlignVertical="top"
+            />
+          </ScrollView>
+          <View style={[styles.dialogActions, { marginTop: 16 }]}>
+            <TouchableOpacity
+              style={[styles.dialogButton, styles.dialogButtonCancel]}
+              onPress={() => {
+                setShowRejectDialog(false);
+                setRejectingCampaignId(null);
+                setRejectionReason('');
+              }}
+            >
+              <Text style={styles.dialogButtonText}>{t('cancel')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.dialogButton, styles.dialogButtonConfirm]}
+              onPress={handleReject}
+              disabled={!rejectionReason.trim() || processingId !== null}
+            >
+              {processingId !== null ? (
+                <ActivityIndicator size="small" color={colors.primary.foreground} />
+              ) : (
+                <Text style={[styles.dialogButtonText, { color: colors.primary.foreground }]}>
+                  {t('reject')}
+                </Text>
+              )}
+            </TouchableOpacity>
           </View>
-        </KeyboardAvoidingView>
-      </Modal>
+        </View>
+      </CenterModal>
     </View>
   );
 };
@@ -1154,17 +1139,6 @@ const createStyles = (colors: any) =>
     emptyText: {
       fontSize: 16,
       color: colors.foreground.muted,
-    },
-    dialogOverlay: {
-      position: 'absolute',
-      top: 0,
-      start: 0,
-      end: 0,
-      bottom: 0,
-      backgroundColor: colors.overlay.dark,
-      justifyContent: 'center',
-      alignItems: 'center',
-      zIndex: 1000,
     },
     dialog: {
       backgroundColor: colors.card.background,

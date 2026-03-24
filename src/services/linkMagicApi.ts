@@ -1,9 +1,7 @@
 import { supabase } from '@/integrations/supabase/client';
 
-// Rekto Links API Configuration
-const REKTO_LINKS_API_URL = 'https://uivgyexyakfincwgghgh.supabase.co/functions/v1/links-api';
-// Use proxy function that handles API secret securely
-const REKTO_LINKS_PROXY_URL = 'https://uivgyexyakfincwgghgh.supabase.co/functions/v1/linkmagic-proxy';
+const SUPABASE_FUNCTIONS_URL = `${supabase.supabaseUrl}/functions/v1`;
+const SUPABASE_ANON_KEY = supabase.supabaseKey;
 const LINKMAGIC_TIMEOUT_MS = 45000;
 
 // Rekto Links API Response Types
@@ -176,10 +174,7 @@ export const fetchLinkPage = async (linkmagicEmail: string): Promise<LinkMagicRe
       const session = await getValidSession();
 
       // Use direct fetch with query params for React Native compatibility
-      const SUPABASE_URL = 'https://uivgyexyakfincwgghgh.supabase.co';
-      const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVpdmd5ZXh5YWtmaW5jd2dnaGdoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3MTY4MDYsImV4cCI6MjA4MzI5MjgwNn0.Crz4L5Sbev3Jft6ou1SFz7htpWSWRxVaTaYgDE2DGso';
-      
-      const url = `${SUPABASE_URL}/functions/v1/linkmagic-proxy?linkmagic_email=${encodeURIComponent(linkmagicEmail)}`;
+      const url = `${SUPABASE_FUNCTIONS_URL}/linkmagic-proxy?linkmagic_email=${encodeURIComponent(linkmagicEmail)}`;
       
       if (__DEV__) {
         console.log('🔍 Fetching from proxy:', url);
@@ -375,10 +370,7 @@ export const createLinkPage = async (
     // Get valid session (with auto-refresh if needed)
     const session = await getValidSession();
 
-    const SUPABASE_URL = 'https://uivgyexyakfincwgghgh.supabase.co';
-    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVpdmd5ZXh5YWtmaW5jd2dnaGdoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3MTY4MDYsImV4cCI6MjA4MzI5MjgwNn0.Crz4L5Sbev3Jft6ou1SFz7htpWSWRxVaTaYgDE2DGso';
-    
-    const url = `${SUPABASE_URL}/functions/v1/linkmagic-proxy`;
+    const url = `${SUPABASE_FUNCTIONS_URL}/linkmagic-proxy`;
     
     const response = await fetch(url, {
       method: 'POST',
@@ -431,9 +423,6 @@ export const addSocialLink = async (
     // Get valid session (with auto-refresh if needed)
     const session = await getValidSession();
     
-    const SUPABASE_URL = 'https://uivgyexyakfincwgghgh.supabase.co';
-    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVpdmd5ZXh5YWtmaW5jd2dnaGdoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3MTY4MDYsImV4cCI6MjA4MzI5MjgwNn0.Crz4L5Sbev3Jft6ou1SFz7htpWSWRxVaTaYgDE2DGso';
-    
     if (!options?.skipDuplicateCheck) {
       // CRITICAL: Before adding, verify link doesn't exist to prevent duplicates
       // Fetch current links to check
@@ -458,7 +447,7 @@ export const addSocialLink = async (
       }
     }
     
-    const url = `${SUPABASE_URL}/functions/v1/linkmagic-proxy`;
+    const url = `${SUPABASE_FUNCTIONS_URL}/linkmagic-proxy`;
     
     if (__DEV__) {
       console.log(`📤 Adding NEW link: icon=${icon}, value=${value.substring(0, 20)}...`);
@@ -517,11 +506,8 @@ export const updateLinkPage = async (
     // Get valid session (with auto-refresh if needed)
     const session = await getValidSession();
 
-    const SUPABASE_URL = 'https://uivgyexyakfincwgghgh.supabase.co';
-    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVpdmd5ZXh5YWtmaW5jd2dnaGdoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3MTY4MDYsImV4cCI6MjA4MzI5MjgwNn0.Crz4L5Sbev3Jft6ou1SFz7htpWSWRxVaTaYgDE2DGso';
-    
     // First, check if the page exists
-    const checkUrl = `${SUPABASE_URL}/functions/v1/linkmagic-proxy?linkmagic_email=${encodeURIComponent(linkmagicEmail)}`;
+    const checkUrl = `${SUPABASE_FUNCTIONS_URL}/linkmagic-proxy?linkmagic_email=${encodeURIComponent(linkmagicEmail)}`;
     const checkResponse = await fetch(checkUrl, {
       method: 'GET',
       headers: {
@@ -541,7 +527,7 @@ export const updateLinkPage = async (
         console.log('📝 Page does not exist, creating new page with slug:', slug);
       }
       
-      const createUrl = `${SUPABASE_URL}/functions/v1/linkmagic-proxy`;
+      const createUrl = `${SUPABASE_FUNCTIONS_URL}/linkmagic-proxy`;
       const createResponse = await fetch(createUrl, {
         method: 'POST',
         headers: {
@@ -585,7 +571,7 @@ export const updateLinkPage = async (
     }
     
     // Update existing page (or newly created page with theme/avatar)
-    const url = `${SUPABASE_URL}/functions/v1/linkmagic-proxy`;
+    const url = `${SUPABASE_FUNCTIONS_URL}/linkmagic-proxy`;
 
     if (__DEV__) {
       console.log('📤 PATCH request to linkmagic-proxy:', {
@@ -662,10 +648,7 @@ export const deleteSocialLink = async (
     // Get valid session (with auto-refresh if needed)
     const session = await getValidSession();
 
-    const SUPABASE_URL = 'https://uivgyexyakfincwgghgh.supabase.co';
-    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVpdmd5ZXh5YWtmaW5jd2dnaGdoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3MTY4MDYsImV4cCI6MjA4MzI5MjgwNn0.Crz4L5Sbev3Jft6ou1SFz7htpWSWRxVaTaYgDE2DGso';
-    
-    const url = `${SUPABASE_URL}/functions/v1/linkmagic-proxy`;
+    const url = `${SUPABASE_FUNCTIONS_URL}/linkmagic-proxy`;
     
     const response = await fetch(url, {
       method: 'POST',
@@ -707,26 +690,15 @@ export const deleteSocialLinkByIconValue = async (
   value: string
 ): Promise<LinkMagicResponse> => {
   return await retryWithBackoff(async () => {
-    const response = await fetch(REKTO_LINKS_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
+    const { data, error } = await supabase.functions.invoke('links-api', {
+      body: {
         action: 'delete_by_icon_value',
         user_email: linkmagicEmail,
         icon,
         value,
-      }),
-      signal: createTimeoutSignal(),
+      },
     });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error || `API returned ${response.status}`);
-    }
-
-    const data = await response.json();
+    if (error) throw error;
 
     if (!data.success) {
       throw new Error(data.error || 'Failed to delete link');
@@ -764,7 +736,7 @@ export const fetchThemes = async (): Promise<ThemeApiResponse> => {
   return await retryWithBackoff(async () => {
     const headers = await getAuthHeaders();
     const response = await fetch(
-      'https://uivgyexyakfincwgghgh.supabase.co/functions/v1/links-themes',
+      `${SUPABASE_FUNCTIONS_URL}/links-themes`,
       {
         method: 'GET',
         headers,

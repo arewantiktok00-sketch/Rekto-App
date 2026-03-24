@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, StyleSheet, Platform, Dimensions, StatusBar } from 'react-native';
+import { View, StyleSheet, Platform, Dimensions, StatusBar, Vibration } from 'react-native';
 import { useTheme } from '@/contexts/ThemeContext';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as Haptics from 'expo-haptics';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+// Full physical screen so splash fills under status bar and home indicator (no black bars)
+const screen = Dimensions.get('screen');
+const SCREEN_WIDTH = screen.width;
+const SCREEN_HEIGHT = screen.height;
 
 // Lottie for native platforms (Android & iOS)
 let LottieView: any = null;
@@ -33,7 +34,6 @@ interface AnimatedSplashProps {
 }
 
 export function AnimatedSplash({ onFinish, onReady }: AnimatedSplashProps) {
-  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const lottieRef = useRef<any>(null);
   const webLottieRef = useRef<any>(null);
@@ -46,10 +46,8 @@ export function AnimatedSplash({ onFinish, onReady }: AnimatedSplashProps) {
       // Small delay for smooth transition
       const timer = setTimeout(() => {
         if (Platform.OS === 'android') {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          Vibration.vibrate(10);
         }
-        
-        // Call onFinish callback - navigation will be handled in _layout.tsx
         onFinish();
       }, 100);
 
@@ -104,7 +102,7 @@ export function AnimatedSplash({ onFinish, onReady }: AnimatedSplashProps) {
         }
         
         // Play animation once (no loop)
-        lottieRef.current.play();
+        lottieRef.current?.play?.();
         console.log('[Splash] Native animation started');
       } else {
         // Retry if ref not ready yet
@@ -140,14 +138,12 @@ export function AnimatedSplash({ onFinish, onReady }: AnimatedSplashProps) {
     return lottieSource;
   };
 
-  // Match app dark default (design token #0F0F14)
   const splashBg = '#0F0F14';
   return (
     <>
-      <StatusBar barStyle="light-content" backgroundColor={splashBg} translucent={false} />
-      <View style={[styles.root, { backgroundColor: splashBg }]}>
-      {/* Full background - fills entire screen */}
-      <View style={[styles.background, { backgroundColor: splashBg }]} />
+      <StatusBar barStyle="light-content" backgroundColor={splashBg} translucent />
+      <View style={[styles.root, styles.rootFullScreen, { backgroundColor: splashBg }]}>
+        <View style={[styles.background, { backgroundColor: splashBg }]} />
 
       {/* Lottie Animation - Web Platform */}
       {Platform.OS === 'web' && DotLottieReact && (
@@ -175,13 +171,14 @@ export function AnimatedSplash({ onFinish, onReady }: AnimatedSplashProps) {
             style={styles.lottie}
             autoPlay={false}
             loop={false}
-            resizeMode="contain"
+            resizeMode="cover"
             onAnimationFinish={() => {
               console.log('[Splash] Native animation finished');
               setAnimationFinished(true);
             }}
-            onLayout={() => {
-              console.log('[Splash] Lottie view laid out');
+            onLayout={(event) => {
+              const { height, width } = event?.nativeEvent?.layout ?? { height: 0, width: 0 };
+              if (__DEV__) console.log('[Splash] Lottie view laid out', width, height);
             }}
           />
         </View>
@@ -194,14 +191,16 @@ export function AnimatedSplash({ onFinish, onReady }: AnimatedSplashProps) {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    width: SCREEN_WIDTH,
-    height: SCREEN_HEIGHT,
     backgroundColor: '#0F0F14',
+  },
+  rootFullScreen: {
     position: 'absolute',
     top: 0,
-    start: 0,
-    end: 0,
+    left: 0,
+    right: 0,
     bottom: 0,
+    width: SCREEN_WIDTH,
+    height: SCREEN_HEIGHT,
   },
   background: {
     ...StyleSheet.absoluteFillObject,
@@ -209,13 +208,10 @@ const styles = StyleSheet.create({
   },
   lottieContainer: {
     ...StyleSheet.absoluteFillObject,
-    width: SCREEN_WIDTH,
-    height: SCREEN_HEIGHT,
     justifyContent: 'center',
     alignItems: 'center',
   },
   lottie: {
-    // Animation is 1080x1920, scale to fit screen while maintaining aspect ratio
     width: SCREEN_WIDTH,
     height: SCREEN_HEIGHT,
   },

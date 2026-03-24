@@ -105,7 +105,8 @@ export function ToastProvider() {
     translateY.value = withTiming(-100, { duration: 200 });
     opacity.value = withTiming(0, { duration: 200 }, (finished) => {
       if (finished) {
-        runOnJS(clearToast)();
+        // Defer unmount so Reanimated can clean up refs and avoid "Failed to find host instance"
+        runOnJS(() => setTimeout(clearToast, 50))();
       }
     });
   }, [clearToast, opacity, translateY]);
@@ -145,10 +146,14 @@ export function ToastProvider() {
     };
   }, [showToast]);
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: translateY.value + panY.value }],
-    opacity: opacity.value,
-  }));
+  const animatedStyle = useAnimatedStyle(() => {
+    const ty = (typeof translateY.value === 'number' ? translateY.value : -100) + (typeof panY.value === 'number' ? panY.value : 0);
+    const op = typeof opacity.value === 'number' ? opacity.value : 0;
+    return {
+      transform: [{ translateY: ty }],
+      opacity: op,
+    };
+  });
 
   const panGesture = useMemo(
     () =>

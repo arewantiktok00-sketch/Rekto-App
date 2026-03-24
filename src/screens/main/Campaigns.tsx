@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { View, StyleSheet, TouchableOpacity, FlatList, RefreshControl, ScrollView, Alert } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, View, StyleSheet, TouchableOpacity, FlatList, RefreshControl, ScrollView, Alert } from 'react-native';
 import { useNavigation, useIsFocused, useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
@@ -7,19 +7,21 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useRemoteConfig } from '@/contexts/RemoteConfigContext';
 import { CampaignCard } from '@/components/common/CampaignCard';
 import { ExtendAdModal } from '@/components/common/ExtendAdModal';
-import { Plus, AlertCircle, Rocket } from 'lucide-react-native';
-import { useTheme } from '@/contexts/ThemeContext';
 import { ScreenHeader } from '@/components/common/ScreenHeader';
-import { LinearGradient } from 'expo-linear-gradient';
+import { Plus, Rocket } from 'lucide-react-native';
+import { useTheme } from '@/contexts/ThemeContext';
+import LinearGradient from 'react-native-linear-gradient';
 import { spacing, borderRadius } from '@/theme/spacing';
 import { useCampaigns } from '@/hooks/useCampaigns';
 import { useCampaignRealtime } from '@/hooks/useCampaignRealtime';
+import { useTikTokSync } from '@/hooks/useTikTokSync';
 import { getCached } from '@/services/globalCache';
 import { safeQuery } from '@/integrations/supabase/client';
 import { supabase } from '@/lib/supabase';
 import { Text } from '@/components/common/Text';
 import { toast } from '@/utils/toast';
-import { isRTL, rtlText, rtlRow } from '@/utils/rtl';
+import { isRTL, rtlText } from '@/utils/rtl';
+import { getDisplayBudget } from '@/utils/campaignBudget';
 
 type FilterStatus = 'all' | 'active' | 'pending' | 'completed' | 'rejected';
 
@@ -45,7 +47,7 @@ function Campaigns() {
   const insets = useSafeAreaInsets();
   const isFocused = useIsFocused();
   const { user } = useAuth();
-  const { settings: config } = useRemoteConfig();
+  const { isFeatureEnabled, isPaymentsHidden } = useRemoteConfig();
   const { t, language } = useLanguage();
   const rtl = isRTL(language);
   const { colors } = useTheme();
@@ -55,6 +57,24 @@ function Campaigns() {
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
   const cachedProfile = getCached<any>('profile', null);
   const [canPauseAds, setCanPauseAds] = useState(Boolean(cachedProfile?.can_pause_ads));
+  const [canExtendAds, setCanExtendAds] = useState(Boolean(cachedProfile?.can_extend_ads));
+  useEffect(() => {
+    if (!isFeatureEnabled('campaigns_enabled')) {
+      const goToSafeScreen = () => {
+        const nav = navigation as any;
+        if (typeof nav.canGoBack === 'function' && nav.canGoBack()) {
+          nav.goBack();
+          return;
+        }
+        nav.navigate('Dashboard');
+      };
+      Alert.alert(
+        t('featureDisabledTitle'),
+        t('campaignsDisabled'),
+        [{ text: t('done'), onPress: goToSafeScreen }]
+      );
+    }
+  }, [isFeatureEnabled, navigation, t]);
 
   useEffect(() => {
     navigation.setParams?.({ hideTabBar: extendModalVisible });
@@ -67,13 +87,14 @@ function Campaigns() {
         const { data } = await safeQuery((client) =>
           client
             .from('profiles')
-            .select('can_pause_ads')
+            .select('can_pause_ads, can_extend_ads')
             .eq('user_id', user.id)
             .maybeSingle()
         );
         setCanPauseAds(Boolean(data?.can_pause_ads));
+        setCanExtendAds(Boolean(data?.can_extend_ads));
       } catch (error) {
-        console.warn('[Campaigns] Failed to fetch pause permission:', error);
+        console.warn('[Campaigns] Failed to fetch permissions:', error);
       }
     };
 
@@ -99,68 +120,91 @@ function Campaigns() {
     };
   }, [user?.id]);
   
-  // Use optimized hook with caching
-  const { campaigns, isRefreshing, refresh, refreshSilent, applyRealtimeUpdate } = useCampaigns({
+  // Fetch ALL campaigns; filter deleted_external and client-side tabs
+  const { campaigns: allCampaigns, isLoading, refresh, refreshSilent, applyRealtimeUpdate } = useCampaigns({
     userId: user?.id || '',
-    filter: activeFilter,
-    autoRefresh: true,
-    refreshInterval: 10000,
   });
+  const initialLoadDone = useRef(false);
 
-  // Handle realtime updates independently
+  useEffect(() => {
+    if (!isLoading) {
+      initialLoadDone.current = true;
+    }
+  }, [isLoading]);
+
+  // Filter out deleted_external; optionally hide old rejected/failed (30+ days)
+  const OLD_REJECTED_DAYS = 30;
+  const visibleCampaigns = useMemo(() => {
+    return allCampaigns.filter((campaign) => {
+      const status = (campaign.status || '').toLowerCase();
+      if (status === 'deleted_external') return false;
+      if (['rejected', 'failed'].includes(status)) {
+        const updated = (campaign as any).updated_at || campaign.created_at;
+        if (updated && Date.now() - new Date(updated).getTime() > OLD_REJECTED_DAYS * 24 * 60 * 60 * 1000) return false;
+      }
+      return true;
+    });
+  }, [allCampaigns]);
+
+  // Client-side filter — instant, no network
+  const filteredCampaigns = useMemo(() => {
+    if (activeFilter === 'all') return visibleCampaigns;
+    return visibleCampaigns.filter((c) => {
+      const status = (c.status || '').toLowerCase();
+      if (activeFilter === 'active') return status === 'active' || status === 'running';
+      if (activeFilter === 'pending') return ['pending', 'in_review', 'awaiting_payment', 'waiting_for_admin', 'verifying_payment', 'scheduled'].includes(status);
+      if (activeFilter === 'completed') return status === 'completed' || status === 'paused';
+      if (activeFilter === 'rejected') return status === 'rejected' || status === 'failed';
+      return true;
+    });
+  }, [visibleCampaigns, activeFilter]);
+
+  // Filter counts for badges — instant
+  const filterCounts = useMemo(() => ({
+    all: visibleCampaigns.length,
+    active: visibleCampaigns.filter((c) => ['active', 'running'].includes((c.status || '').toLowerCase())).length,
+    pending: visibleCampaigns.filter((c) => ['pending', 'in_review', 'awaiting_payment', 'waiting_for_admin', 'verifying_payment', 'scheduled'].includes((c.status || '').toLowerCase())).length,
+    completed: visibleCampaigns.filter((c) => ['completed', 'paused'].includes((c.status || '').toLowerCase())).length,
+    rejected: visibleCampaigns.filter((c) => ['rejected', 'failed'].includes((c.status || '').toLowerCase())).length,
+  }), [visibleCampaigns]);
+
+  // Realtime should patch the UI quietly. Push notifications handle alerts.
   const handleRealtimeUpdate = useCallback((payload: {
     eventType: 'INSERT' | 'UPDATE' | 'DELETE';
     new?: any;
     old?: any;
   }) => {
-    console.log('[CampaignsScreen] Realtime update received:', payload.eventType);
+    if (__DEV__) {
+      console.log('[CampaignsScreen] Realtime update received:', payload.eventType);
+    }
+    if (payload.eventType === 'INSERT') {
+      // Silent realtime path: patch list directly (no refresh spinner/toast flicker).
+      applyRealtimeUpdate(payload);
+      return;
+    }
+
     applyRealtimeUpdate(payload);
   }, [applyRealtimeUpdate]);
 
-  // Subscribe to realtime updates (independent of Lovable web app)
   useCampaignRealtime({
     userId: user?.id,
     enabled: !!user,
     onUpdate: handleRealtimeUpdate,
   });
 
-  // TikTok sync only while focused
+  const { refresh: tiktokRefresh } = useTikTokSync({
+    autoSync: true,
+    pollingInterval: 10000,
+    onSyncComplete: () => refreshSilent(),
+  });
+
   useFocusEffect(
     useCallback(() => {
-      if (!user?.id) return () => {};
-
-      let isActive = true;
-      const syncWithTikTok = async () => {
-        if (!isActive) return;
-        try {
-          await supabase.functions.invoke('tiktok-sync-status', {
-            body: { syncAll: true },
-          });
-          refreshSilent();
-        } catch (err) {
-          console.error('[CampaignsScreen] TikTok sync failed:', err);
-        }
-      };
-
-      // Initial sync
-      syncWithTikTok();
-
-      // Sync every 10 seconds while focused
-      const interval = setInterval(syncWithTikTok, 10000);
-
-      return () => {
-        isActive = false;
-        clearInterval(interval);
-      };
-    }, [user?.id])
-  );
-
-  // Refresh campaigns whenever the screen comes into focus
-  useFocusEffect(
-    useCallback(() => {
-      refreshSilent();
-      return () => {};
-    }, [refreshSilent])
+      if (!user?.id) return;
+      if (initialLoadDone.current) {
+        refreshSilent();
+      }
+    }, [user?.id, refreshSilent])
   );
 
   const filters: { value: FilterStatus; labelKey: string }[] = [
@@ -186,6 +230,11 @@ function Campaigns() {
     refresh(); // Refresh campaigns list
   }, [refresh]);
 
+  const handleManualRefresh = useCallback(async () => {
+    await tiktokRefresh();
+    await refreshSilent();
+  }, [tiktokRefresh, refreshSilent]);
+
   const handlePausePress = useCallback(async (campaign: Campaign) => {
     try {
       const { data, error } = await supabase.functions.invoke('user-pause-ad', {
@@ -193,7 +242,7 @@ function Campaigns() {
       });
 
       if (error) {
-        Alert.alert(t('error') || 'Error', error.message);
+        toast.error(t('error'), t('somethingWentWrong'));
         return;
       }
 
@@ -202,39 +251,36 @@ function Campaigns() {
           eventType: 'UPDATE',
           new: { ...campaign, status: 'paused' },
         });
-        toast.info(t('adPaused') || 'Ad Paused', t('adPausedMessage') || 'Your ad has been paused successfully.');
-        refreshSilent();
+        toast.info(t('adPaused'), t('adPausedMessage'));
         return;
       }
 
       switch (data?.error) {
         case 'NO_PERMISSION':
-          Alert.alert(t('noPermission') || 'No Permission', t('noPermissionPause') || 'You do not have permission to pause ads.');
+          Alert.alert(t('noPermission'), t('noPermissionPause'));
           break;
         case 'INSUFFICIENT_SPEND':
           Alert.alert(
-            t('cannotPause') || 'Cannot Pause',
-            (t('pauseMinSpend') || 'Ad must spend at least $5 before pausing. Current: $') + ((campaign as any).spend?.toFixed(2) ?? '0')
+            t('cannotPause'),
+            t('pauseMinSpend') + ' $' + ((campaign as any).spend?.toFixed(2) ?? '0')
           );
           break;
         case 'DAILY_LIMIT_REACHED':
-          Alert.alert(t('dailyLimit') || 'Daily Limit', data.message || (t('dailyLimitPauses') || "You've used all pauses today."));
+          Alert.alert(t('dailyLimit'), data.message || t('dailyLimitPauses'));
           break;
         case 'ALREADY_PAUSED':
-          Alert.alert(t('alreadyPaused') || 'Already Paused', t('adAlreadyPaused') || 'This ad has already been paused.');
+          Alert.alert(t('alreadyPaused'), t('adAlreadyPaused'));
           break;
         case 'INVALID_STATUS':
-          Alert.alert(t('cannotPause') || 'Cannot Pause', t('onlyActiveCanPause') || 'Only active ads can be paused.');
+          Alert.alert(t('cannotPause'), t('onlyActiveCanPause'));
           break;
         default:
-          Alert.alert(t('error') || 'Error', data?.message || (t('failedToPause') || 'Failed to pause ad.'));
+          toast.error(t('error'), t('failedToPause'));
       }
-      refreshSilent();
     } catch (err: any) {
-      refreshSilent();
-      toast.error(t('failedToPause') || 'Failed to pause ad', err?.message || 'Please try again');
+      toast.error(t('failedToPause'), t('somethingWentWrong'));
     }
-  }, [applyRealtimeUpdate, refreshSilent, t]);
+  }, [applyRealtimeUpdate, t]);
 
   // Memoized render item for FlatList performance - includes Boost Again button outside card
   const renderItem = useCallback(({ item }: { item: Campaign }) => (
@@ -244,13 +290,14 @@ function Campaigns() {
         onPress={() => handleCardPress(item.id)}
         onExtendPress={handleExtendPress}
         canPauseAds={canPauseAds}
+        canExtendAds={canExtendAds}
         onPausePress={handlePausePress}
       />
       
-      {/* Boost Again Button - Outside Card, only for completed campaigns */}
-      {item.status === 'completed' && (
+      {/* Boost Again Button - Outside Card, only for completed-like campaigns */}
+      {!isPaymentsHidden && ['completed', 'paused'].includes((item.status || '').toLowerCase()) && (
         <TouchableOpacity
-          style={[styles.boostAgainButton, isRTL && styles.rowReverse]}
+          style={styles.boostAgainButton}
           onPress={() => {
             navigation.navigate('Main', {
               screen: 'CreateAd',
@@ -264,7 +311,8 @@ function Campaigns() {
                   daily_budget: (item as any).daily_budget,
                   duration_days: (item as any).duration_days,
                   call_to_action: (item as any).call_to_action,
-                  // NOTE: destination_url and video_url are NOT passed
+                  video_url: (item as any).video_url || '',
+                  destination_url: (item as any).destination_url || null,
                 }
               }
             });
@@ -273,12 +321,12 @@ function Campaigns() {
         >
           <Rocket size={16} color="#7C3AED" />
           <Text style={[styles.boostAgainText, isRTL && styles.textRTL]}>
-            {t('boostAgain') || 'Boost Again'}
+            {t('boostAgain')}
           </Text>
         </TouchableOpacity>
       )}
     </View>
-  ), [handleCardPress, handleExtendPress, navigation, t, isRTL]);
+  ), [handleCardPress, handleExtendPress, navigation, t, isRTL, isPaymentsHidden, styles]);
 
   const keyExtractor = useCallback((item: Campaign) => item.id, []);
 
@@ -291,28 +339,29 @@ function Campaigns() {
   return (
     <View style={styles.container}>
       <ScreenHeader
-        title={t('campaigns') || 'Campaigns'}
+        title={t('campaigns')}
         onBack={() => navigation.goBack()}
-        rightElement={
+        style={{ paddingTop: insets.top + 8, marginBottom: 0 }}
+        rightElement={!isPaymentsHidden ? (
           <TouchableOpacity
-            style={styles.newAdButton}
             onPress={() => navigation.navigate('Main', { screen: 'CreateAd' })}
+            activeOpacity={0.85}
+            style={styles.newAdButton}
           >
             <LinearGradient
-              colors={colors.gradients.primary}
-              style={[styles.newAdButtonGradient, isRTL && styles.rowReverse]}
+              colors={['#7C3AED', '#9333EA']}
+              style={styles.newAdButtonGradient}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
             >
-              <Plus size={18} color="#fff" />
-              <Text style={[styles.newAdButtonText, isRTL && styles.textRTL]}>{t('newAd') || 'New Ad'}</Text>
+              <Plus size={16} color="#fff" />
+              <Text style={styles.newAdButtonText}>+ {t('createAd')}</Text>
             </LinearGradient>
           </TouchableOpacity>
-        }
-        style={{ paddingTop: insets.top + 16 }}
+        ) : null}
       />
 
-      {/* Filter Tabs */}
+      {/* Filter Tabs — in RTL, first item (All) appears rightmost automatically */}
       <View style={styles.filterContainer}>
         <ScrollView
           horizontal
@@ -337,49 +386,63 @@ function Campaigns() {
               ]}
             >
               {t(filter.labelKey)}
+              {filterCounts[filter.value] !== undefined && ` (${filterCounts[filter.value]})`}
             </Text>
           </TouchableOpacity>
         ))}
         </ScrollView>
       </View>
 
-      {/* Campaigns List - Optimized FlatList */}
-      {campaigns.length === 0 ? (
+      {/* Campaigns List - data is client-filtered (instant) */}
+      {isLoading && !initialLoadDone.current ? (
+        <View style={styles.emptyState}>
+          <ActivityIndicator size="large" color={colors.primary?.DEFAULT ?? '#7C3AED'} />
+          <Text style={[styles.emptyStateText, isRTL && styles.textRTL, { marginTop: 12 }]}>{t('loading') || 'Loading...'}</Text>
+        </View>
+      ) : filteredCampaigns.length === 0 ? (
         <View style={styles.emptyState}>
           <Text style={[styles.emptyStateText, isRTL && styles.textRTL]}>{t('noCampaigns')}</Text>
-          <TouchableOpacity
-            style={styles.createButtonContainer}
-            onPress={() => navigation.navigate('Main', { screen: 'CreateAd' })}
-          >
-            <LinearGradient
-              colors={['#7C3AED', '#9333EA']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={[styles.createButton, isRTL && styles.rowReverse]}
+          {!isPaymentsHidden && (
+            <TouchableOpacity
+              style={styles.createButtonContainer}
+              onPress={() => navigation.navigate('Main', { screen: 'CreateAd' })}
             >
-              <Plus size={20} color="#fff" />
-              <Text style={[styles.createButtonText, isRTL && styles.textRTL]}>{t('createFirstAd')}</Text>
-            </LinearGradient>
-          </TouchableOpacity>
+              <LinearGradient
+                colors={['#7C3AED', '#9333EA']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.createButton}
+              >
+                <Plus size={20} color="#fff" />
+                <Text style={[styles.createButtonText, isRTL && styles.textRTL]}>{t('createFirstAd')}</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          )}
         </View>
       ) : (
         <FlatList
-          data={campaigns}
+          data={filteredCampaigns || []}
           renderItem={renderItem}
           keyExtractor={keyExtractor}
           getItemLayout={getItemLayout}
           refreshControl={
-            <RefreshControl refreshing={isRefreshing} onRefresh={refresh} />
+            <RefreshControl
+              refreshing={false}
+              onRefresh={handleManualRefresh}
+              tintColor="transparent"
+              colors={['transparent']}
+              progressViewOffset={-1000}
+              style={{ opacity: 0 }}
+            />
           }
           contentContainerStyle={[
             styles.listContent,
             { paddingBottom: insets.bottom + 100 }
           ]}
-          // PERFORMANCE OPTIMIZATIONS:
-          removeClippedSubviews={true}
+          removeClippedSubviews={false}
+          initialNumToRender={10}
           maxToRenderPerBatch={10}
           windowSize={5}
-          initialNumToRender={8}
           updateCellsBatchingPeriod={50}
         />
       )}
@@ -394,7 +457,11 @@ function Campaigns() {
           }}
           campaignId={selectedCampaign.id}
           campaignTitle={selectedCampaign.title}
-          dailyBudget={(selectedCampaign as any).daily_budget || 20}
+          dailyBudget={Number((selectedCampaign as any).daily_budget) || 20}
+          totalBudget={getDisplayBudget(selectedCampaign as any)}
+          durationDays={(selectedCampaign as any).duration_days}
+          realEndDate={(selectedCampaign as any).real_end_date ?? null}
+          extensionStatus={(selectedCampaign as any).extension_status ?? null}
           onSuccess={handleExtendSuccess}
         />
       )}
@@ -420,10 +487,26 @@ const createStyles = (colors: any, insets: any, isRTL?: boolean) => StyleSheet.c
     borderBottomWidth: 1,
     borderBottomColor: colors.border.DEFAULT,
   },
-  headerRTL: {
+  headerRow: {
     flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: insets.top + 8,
+    marginBottom: 16,
   },
-  rowReverse: {
+  headerLeftGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  headerTitleText: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: colors.foreground.DEFAULT,
+    fontFamily: 'Rabar_021',
+  },
+  headerRTL: {
     flexDirection: 'row',
   },
   textRTL: {
@@ -436,18 +519,12 @@ const createStyles = (colors: any, insets: any, isRTL?: boolean) => StyleSheet.c
     gap: 8,
   },
   backButton: {
-    width: 40,
-    height: 40,
-    minWidth: 40,
-    minHeight: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.06)',
+    padding: 8,
+    marginStart: -8,
   },
   backButtonLabel: {
     fontSize: 16,
-    color: '#000',
+    color: colors.foreground.DEFAULT,
     fontWeight: '500',
   },
   headerTitle: {
@@ -469,12 +546,13 @@ const createStyles = (colors: any, insets: any, isRTL?: boolean) => StyleSheet.c
   newAdButtonGradient: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: spacing.sm + 2,
-    paddingHorizontal: spacing.md,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
     gap: spacing.xs,
+    borderRadius: 999,
   },
   newAdButtonText: {
-    color: '#fff',
+    color: colors.primary?.foreground ?? '#FFFFFF',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -506,7 +584,7 @@ const createStyles = (colors: any, insets: any, isRTL?: boolean) => StyleSheet.c
     fontWeight: '500',
   },
   filterTabTextActive: {
-    color: '#fff',
+    color: colors.primary?.foreground ?? '#FFFFFF',
     fontWeight: '600',
   },
   list: {

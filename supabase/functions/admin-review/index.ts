@@ -37,6 +37,16 @@ type Body = {
   campaignId?: string;
   rejectionReason?: string;
   advertiserId?: string;
+  // extension-payment (caller = campaign owner)
+  extensionDays?: number;
+  extensionCostUSD?: number;
+  totalExtensionUSD?: number;
+  newTotalBudget?: number;
+  newEndDate?: string;
+  paymentMethod?: string;
+  transactionId?: string;
+  senderName?: string;
+  amountIQD?: string;
 };
 
 serve(async (req) => {
@@ -66,10 +76,99 @@ serve(async (req) => {
 
   try {
     const body = (await req.json().catch(() => ({}))) as Body;
-    const { action, campaignId, rejectionReason, advertiserId } = body;
+    const {
+      action,
+      campaignId,
+      rejectionReason,
+      advertiserId,
+      extensionDays,
+      extensionCostUSD,
+      totalExtensionUSD,
+      newTotalBudget,
+      newEndDate,
+      paymentMethod,
+      transactionId,
+      senderName,
+      amountIQD,
+    } = body;
 
     if (!action) {
       return json({ error: 'action required' }, 400);
+    }
+
+    // extension-payment: campaign owner submits extension payment (wallet or bank)
+    if (action === 'extension-payment') {
+      if (!campaignId || extensionDays == null || extensionDays < 1) {
+        return json({ success: false, error: 'campaignId and extensionDays required' }, 400);
+      }
+      const userId = authHeader?.startsWith('Bearer ')
+        ? (await supabase.auth.getUser(authHeader.slice(7))).data?.user?.id
+        : null;
+      if (!userId) {
+        return json({ success: false, error: 'Unauthorized' }, 401);
+      }
+      const { data: campaign, error: fetchErr } = await supabase
+        .from('campaigns')
+        .select('id, user_id, status, total_budget, real_end_date, daily_budget')
+        .eq('id', campaignId)
+        .single();
+      if (fetchErr || !campaign) {
+        return json({ success: false, error: 'Campaign not found' }, 404);
+      }
+      if ((campaign as { user_id: string }).user_id !== userId) {
+        return json({ success: false, error: 'Unauthorized' }, 403);
+      }
+      const isWallet = paymentMethod === 'wallet' && transactionId === 'wallet-payment';
+      const extCost = Number(extensionCostUSD) || 0;
+      const totalUsd = Number(totalExtensionUSD) ?? extCost * 1.21;
+
+      if (isWallet) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('wallet_balance')
+          .eq('user_id', userId)
+          .single();
+        const balance = (profile?.wallet_balance ?? 0) as number;
+        if (balance < totalUsd) {
+          return json({ success: false, error: 'Insufficient wallet balance' }, 400);
+        }
+        await supabase
+          .from('profiles')
+          .update({ wallet_balance: balance - totalUsd })
+          .eq('user_id', userId);
+        await supabase.from('transactions').insert({
+          user_id: userId,
+          type: 'debit',
+          amount: -totalUsd,
+          status: 'completed',
+          payment_method: 'ad_extension',
+          description: `Ad extension: campaign ${campaignId}, ${extensionDays} day(s)`,
+        });
+      } else {
+        if (!transactionId?.trim() || !amountIQD?.trim()) {
+          return json({ success: false, error: 'transactionId and amountIQD required for bank payment' }, 400);
+        }
+      }
+
+      const extDailyBudget = extCost / Math.max(1, extensionDays);
+      const updates: Record<string, unknown> = {
+        extension_status: 'verifying_payment',
+        extension_days: extensionDays,
+        extension_daily_budget: extDailyBudget,
+        extension_payment_method: isWallet ? 'wallet' : (paymentMethod || 'bank'),
+        updated_at: new Date().toISOString(),
+      };
+
+      const { error: updateErr } = await supabase
+        .from('campaigns')
+        .update(updates)
+        .eq('id', campaignId);
+
+      if (updateErr) {
+        console.error('extension-payment update error', updateErr);
+        return json({ success: false, error: 'Update failed' }, 500);
+      }
+      return json({ success: true });
     }
 
     // List: return campaigns for review (include extension fields in select)
@@ -137,7 +236,7 @@ serve(async (req) => {
     if (action === 'verify-extension') {
       const { data: campaign, error: fetchErr } = await supabase
         .from('campaigns')
-        .select('id, status, extension_status, extension_days, extension_daily_budget, real_end_date, completed_at, daily_budget')
+        .select('id, status, extension_status, extension_days, extension_daily_budget, real_end_date, completed_at, daily_budget, total_budget')
         .eq('id', campaignId)
         .single();
 
@@ -163,9 +262,13 @@ serve(async (req) => {
         newEndDate = end.toISOString().slice(0, 10);
       }
 
+      const currentTotal = Number((campaign as Record<string, unknown>).total_budget) || 0;
+      const newTotalBudget = currentTotal + extDailyBudget * extDays;
+
       const updates: Record<string, unknown> = {
         updated_at: new Date().toISOString(),
         extension_status: null,
+        total_budget: newTotalBudget,
       };
       if (newEndDate) updates.real_end_date = newEndDate;
       if (extDailyBudget != null && !Number.isNaN(extDailyBudget)) updates.daily_budget = extDailyBudget;

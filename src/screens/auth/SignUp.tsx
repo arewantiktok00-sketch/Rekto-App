@@ -1,15 +1,16 @@
 import { Text } from '@/components/common/Text';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useRemoteConfig } from '@/contexts/RemoteConfigContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { supabase } from '@/integrations/supabase/client';
 import { borderRadius, spacing } from '@/theme/spacing';
 import { iconTransformRTL, inputStyleRTL } from '@/utils/rtl';
 import { toast } from '@/utils/toast';
 import { useNavigation } from '@react-navigation/native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { ArrowLeft, Globe2, MessageCircle, Phone, PlayCircle } from 'lucide-react-native';
-import React, { useEffect, useState } from 'react';
+import { ArrowLeft, Eye, EyeOff, MessageCircle, Phone, PlayCircle } from 'lucide-react-native';
+import { useEffect, useState } from 'react';
 import { KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 /** Sign up page tutorial: from app_settings key signup_tutorial (video_url, title_en, title_ckb, title_ar). */
@@ -24,11 +25,13 @@ export function SignUp() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { t, language, isRTL } = useLanguage();
+  const { isPaymentsHidden } = useRemoteConfig();
   const { colors } = useTheme();
   const styles = createStyles(colors, insets, isRTL);
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [signupTutorial, setSignupTutorial] = useState<SignupTutorialSettings | null>(null);
 
@@ -58,17 +61,17 @@ export function SignUp() {
 
   const handleSignUp = async () => {
     if (!fullName.trim()) {
-      toast.warning('Required', 'Please enter your full name');
+      toast.warning(t('required'), t('fullName'));
       return;
     }
 
     if (!email || !password) {
-      toast.warning('Required', 'Please enter email and password');
+      toast.warning(t('required'), t('pleaseEnterEmailPassword'));
       return;
     }
 
     if (password.length < 8) {
-      toast.warning('Weak password', 'Password must be at least 8 characters');
+      toast.warning(t('weakPassword'), t('minCharacters'));
       return;
     }
 
@@ -90,11 +93,11 @@ export function SignUp() {
       }
 
       if (data?.error) {
-        const errorMsg = data.error;
+        const errorMsg = (data.error as string) || '';
         if (errorMsg.includes('already registered') || errorMsg.includes('Please log in') || errorMsg.includes('reset your password')) {
-          toast.error('Account Exists', errorMsg);
+          toast.error(t('error'), t('accountAlreadyExists'));
         } else {
-          toast.error('Error', errorMsg);
+          toast.error(t('error'), t('somethingWentWrong'));
         }
         return;
       }
@@ -111,10 +114,10 @@ export function SignUp() {
         });
       } else {
         // Account created but no verification needed (shouldn't happen)
-        toast.success('Signup successful', 'Your account is ready');
+        toast.success(t('accountCreated'), t('accountReady'));
       }
     } catch (error: any) {
-      toast.error('Error', error.message || 'Signup failed');
+      toast.error(t('error'), t('signUpFailed'));
     } finally {
       setLoading(false);
     }
@@ -129,8 +132,8 @@ export function SignUp() {
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Top bar: back + logo + language */}
-        <View style={[styles.topBar, isRTL && styles.rowReverse]}>
+        {/* Top bar: back only (no logo or language on sign up) */}
+        <View style={styles.topBar}>
           <TouchableOpacity
             style={styles.iconButton}
             onPress={() => navigation.canGoBack() && navigation.goBack()}
@@ -138,15 +141,6 @@ export function SignUp() {
           >
             <ArrowLeft size={20} color={colors.foreground.muted} style={iconTransformRTL()} />
           </TouchableOpacity>
-
-          <View style={styles.logoContainer}>
-            <Text style={styles.logoText}>rekto</Text>
-          </View>
-
-          <View style={[styles.languageBadge, isRTL && styles.rowReverse]}>
-            <Globe2 size={16} color={colors.foreground.muted} />
-            <Text style={[styles.languageText, isRTL && styles.textRTL]}>{language.toUpperCase()}</Text>
-          </View>
         </View>
 
         <Text style={[styles.title, isRTL && styles.textRTL]}>{t('createAccount') || 'Create Account'}</Text>
@@ -155,7 +149,7 @@ export function SignUp() {
         </Text>
 
         {/* Full Name */}
-        <View style={[styles.fieldLabelRow, isRTL && styles.rowReverse]}>
+        <View style={styles.fieldLabelRow}>
           <Text style={[styles.fieldLabel, isRTL && styles.textRTL]}>{t('fullName') || 'Full Name'}</Text>
           <View style={styles.requiredBadge}>
             <Text style={[styles.requiredBadgeText, isRTL && styles.textRTL]}>{t('required') || 'Required'}</Text>
@@ -163,7 +157,7 @@ export function SignUp() {
         </View>
         <TextInput
           style={[styles.input, inputStyleRTL()]}
-          placeholder="John Doe"
+          placeholder="Arewan Daham"
           placeholderTextColor={colors.input.placeholder}
           value={fullName}
           onChangeText={setFullName}
@@ -184,18 +178,27 @@ export function SignUp() {
         />
 
         {/* Password */}
-        <Text style={[styles.fieldLabel, isRTL && styles.textRTL]}>{t('password') || 'Password'}</Text>
-        <TextInput
-          style={[styles.input, inputStyleRTL()]}
-          placeholder={t('minCharacters') || 'Min. 8 characters'}
-          placeholderTextColor={colors.input.placeholder}
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-          autoCapitalize="none"
-          autoComplete="password-new"
-        />
-        <Text style={[styles.hint, isRTL && styles.textRTL]}>{t('minCharacters') || 'Min. 8 characters'}</Text>
+        <Text style={[styles.fieldLabel, isRTL && styles.textRTL]}>{t('password')}</Text>
+        <View style={styles.passwordWrap}>
+          <TextInput
+            style={[styles.input, styles.passwordInput, inputStyleRTL()]}
+            placeholder={t('minCharacters')}
+            placeholderTextColor={colors.input.placeholder}
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry={!showPassword}
+            autoCapitalize="none"
+            autoComplete="password-new"
+          />
+          <TouchableOpacity
+            style={styles.eyeButton}
+            onPress={() => setShowPassword((v) => !v)}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            {showPassword ? <EyeOff size={22} color={colors.foreground.muted} /> : <Eye size={22} color={colors.foreground.muted} />}
+          </TouchableOpacity>
+        </View>
+        <Text style={[styles.hint, isRTL && styles.textRTL]}>{t('minCharacters')}</Text>
 
         <TouchableOpacity
           style={[styles.buttonContainer, loading && styles.buttonDisabled]}
@@ -209,21 +212,21 @@ export function SignUp() {
             style={styles.button}
           >
             <Text style={[styles.buttonText, isRTL && styles.textRTL]}>
-              {loading ? t('loading') : t('signUp') || 'Create Account'}
+              {loading ? t('loading') : t('signUp')}
             </Text>
           </LinearGradient>
         </TouchableOpacity>
 
         {/* Divider */}
-        <View style={[styles.dividerRow, isRTL && styles.rowReverse]}>
+        <View style={styles.dividerRow}>
           <View style={styles.dividerLine} />
-          <Text style={[styles.dividerText, isRTL && styles.textRTL]}>{t('or') || 'or'}</Text>
+          <Text style={[styles.dividerText, isRTL && styles.textRTL]}>{t('or')}</Text>
           <View style={styles.dividerLine} />
         </View>
 
         {/* Continue with phone */}
         <TouchableOpacity
-          style={[styles.secondaryButton, isRTL && styles.rowReverse]}
+          style={styles.secondaryButton}
           onPress={() => navigation.navigate('Auth', { screen: 'PhoneSignUp' })}
           activeOpacity={0.85}
         >
@@ -233,7 +236,7 @@ export function SignUp() {
           </Text>
         </TouchableOpacity>
 
-        <View style={[styles.signInContainer, isRTL && styles.rowReverse]}>
+        <View style={styles.signInContainer}>
           <Text style={[styles.signInText, isRTL && styles.textRTL]}>{t('alreadyHaveAccount')} </Text>
           <TouchableOpacity onPress={() => navigation.navigate('Auth', { screen: 'Login' })}>
             <Text style={[styles.signInLink, isRTL && styles.textRTL]}>{t('login')}</Text>
@@ -241,25 +244,27 @@ export function SignUp() {
         </View>
 
         {/* Help row - opens WhatsApp */}
-        <TouchableOpacity
-          style={[styles.helpContainer, isRTL && styles.rowReverse]}
-          activeOpacity={0.8}
-          onPress={() => Linking.openURL('https://wa.me/9647504881516')}
-        >
-          <MessageCircle size={16} color={colors.foreground.muted} />
-          <Text style={[styles.helpText, isRTL && styles.textRTL]}>
-            {t('needHelpChatWithUs') || 'Chat with us on WhatsApp'}
-          </Text>
-        </TouchableOpacity>
+        {!isPaymentsHidden && (
+          <TouchableOpacity
+            style={styles.helpContainer}
+            activeOpacity={0.8}
+            onPress={() => Linking.openURL('https://wa.me/9647504881516')}
+          >
+            <MessageCircle size={16} color={colors.foreground.muted} />
+            <Text style={[styles.helpText, isRTL && styles.textRTL]}>
+              {t('needHelpChatWithUs') || 'Chat with us on WhatsApp'}
+            </Text>
+          </TouchableOpacity>
+        )}
 
         {/* Sign up page tutorial — only if owner set video_url in Owner Dashboard → Tutorials → Sign Up Page Tutorial */}
         {signupTutorial?.video_url ? (
           <TouchableOpacity
-            style={[styles.helpContainer, isRTL && styles.rowReverse]}
+            style={styles.helpContainer}
             activeOpacity={0.8}
             onPress={() => Linking.openURL(signupTutorial.video_url!)}
           >
-            <PlayCircle size={16} color={colors.foreground.muted} style={iconTransformRTL()} />
+            <PlayCircle size={16} color={colors.foreground.muted} />
             <Text style={[styles.helpText, isRTL && styles.textRTL]}>
               {language === 'ckb' && signupTutorial.title_ckb
                 ? signupTutorial.title_ckb
@@ -271,7 +276,7 @@ export function SignUp() {
         ) : null}
 
         {/* Terms & Privacy - tappable */}
-        <View style={[styles.termsContainer, isRTL && styles.rowReverse]}>
+        <View style={styles.termsContainer}>
           <Text style={[styles.termsText, isRTL && styles.textRTL]}>
             {t('termsAgreement') || 'By creating an account, you agree to our'}{' '}
             <Text style={[styles.termsLink, isRTL && styles.textRTL]} onPress={() => (navigation.getParent() as any)?.navigate('Terms')}>
@@ -304,11 +309,8 @@ const createStyles = (colors: any, insets: any, isRTL?: boolean) => StyleSheet.c
     textAlign: 'right',
     writingDirection: 'rtl',
   },
-  rowReverse: {
-    flexDirection: 'row',
-  },
   topBar: {
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: spacing[5],
@@ -395,6 +397,30 @@ const createStyles = (colors: any, insets: any, isRTL?: boolean) => StyleSheet.c
     backgroundColor: colors.input.background,
     color: colors.foreground.DEFAULT,
   },
+  passwordWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    marginBottom: spacing[2],
+    borderWidth: 1,
+    borderColor: colors.input.border,
+    borderRadius: 12,
+    backgroundColor: colors.input.background,
+    minHeight: 52,
+  },
+  passwordInput: {
+    flex: 1,
+    minHeight: 48,
+    height: 52,
+    borderWidth: 0,
+    paddingHorizontal: 16,
+    fontSize: 15,
+    marginBottom: 0,
+  },
+  eyeButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
   hint: {
     color: colors.foreground.muted,
     fontSize: 13,
@@ -465,7 +491,7 @@ const createStyles = (colors: any, insets: any, isRTL?: boolean) => StyleSheet.c
     fontWeight: '600',
   },
   signInContainer: {
-    flexDirection: 'row',
+    flexDirection: 'row-reverse',
     justifyContent: 'center',
     alignItems: 'center',
   },

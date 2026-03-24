@@ -1,12 +1,13 @@
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useOwnerAuth } from '@/hooks/useOwnerAuth';
 import { supabase } from '@/integrations/supabase/client';
+import { getErrorMessageForUser } from '@/utils/errorHandling';
 import { sendPushToOwners } from '@/services/notificationPush';
 import { borderRadius, spacing } from '@/theme/spacing';
 import { inputStyleRTL } from '@/utils/rtl';
 import { toast } from '@/utils/toast';
 import { useNavigation } from '@react-navigation/native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { AlertCircle, Check, Copy, CreditCard, HelpCircle } from 'lucide-react-native';
 import React, { useState } from 'react';
 import {
@@ -19,6 +20,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 
 interface TransactionIdInputProps {
   campaignId: string;
@@ -38,6 +40,7 @@ export const TransactionIdInput: React.FC<TransactionIdInputProps> = ({
   const navigation = useNavigation();
   const { t, language, isRTL } = useLanguage();
   const { colors } = useTheme();
+  const { hasAdminAccess } = useOwnerAuth();
   const styles = createStyles(colors, isRTL);
 
   const [submitting, setSubmitting] = useState(false);
@@ -48,13 +51,10 @@ export const TransactionIdInput: React.FC<TransactionIdInputProps> = ({
   const copyToClipboard = (text: string, name: string) => {
     try {
       Clipboard.setString(text);
-      toast.info(
-        isRTL ? 'کۆپی کرا!' : 'Copied!',
-        isRTL ? `${name} ژمارەی هەژمار کۆپی کرا` : `${name} account number copied!`
-      );
+      toast.info(t('copied'), `${name} ${t('accountNumberCopied')}`);
     } catch (error) {
       console.error('Failed to copy to clipboard:', error);
-      toast.error('Error', 'Failed to copy to clipboard');
+      toast.error(t('error'), t('copyFailed'));
     }
   };
 
@@ -63,17 +63,17 @@ export const TransactionIdInput: React.FC<TransactionIdInputProps> = ({
     const trimmedAmount = amountIQD.trim().replace(/,/g, '');
 
     if (!selectedMethod) {
-      toast.warning('Required', 'Please select a payment method');
+      toast.warning(t('required'), t('selectPaymentMethod'));
       return;
     }
 
     if (!trimmedName || trimmedName.length < 2) {
-      toast.warning('Required', 'Please enter sender name');
+      toast.warning(t('required'), t('enterSenderName'));
       return;
     }
 
     if (!trimmedAmount || isNaN(Number(trimmedAmount)) || Number(trimmedAmount) <= 0) {
-      toast.warning('Required', 'Please enter a valid amount');
+      toast.warning(t('required'), t('enterValidAmount'));
       return;
     }
 
@@ -92,23 +92,20 @@ export const TransactionIdInput: React.FC<TransactionIdInputProps> = ({
 
       if (error) {
         console.error('[admin-review] upload-receipt SDK error:', error);
-        Alert.alert('Error', 'Network error. Please check your connection and try again.');
+        const msg = getErrorMessageForUser(error, data ?? null, hasAdminAccess, language === 'ar' ? 'ar' : 'ckb');
+        Alert.alert(hasAdminAccess ? 'Error' : t('error'), msg);
         return;
       }
       if (!data?.success) {
-        const errorMsg = data?.error || 'Failed to submit payment';
-        console.error('[admin-review] upload-receipt business error:', errorMsg);
-        Alert.alert('Action Failed', errorMsg);
+        const msg = getErrorMessageForUser(null, data as { success?: boolean; error?: string } ?? null, hasAdminAccess, language === 'ar' ? 'ar' : 'ckb');
+        console.error('[admin-review] upload-receipt business error:', data?.error);
+        Alert.alert(hasAdminAccess ? t('actionFailed') : (language === 'ckb' ? 'هەڵە' : 'خطأ'), msg);
         return;
       }
 
-      toast.success('Submitted', data?.message || 'Payment submitted successfully');
+      toast.success(t('submitted'), data?.message || t('paymentSubmitted'));
 
-      await sendPushToOwners(
-        campaignId,
-        t('pushUserPaidTitle') || 'User paid',
-        t('pushUserPaidBody') || 'Approve his content.',
-      );
+      await sendPushToOwners(campaignId, t('pushUserPaidTitle'), t('pushUserPaidBody'));
 
       setSenderName('');
       setAmountIQD('');
@@ -116,7 +113,8 @@ export const TransactionIdInput: React.FC<TransactionIdInputProps> = ({
       onSuccess();
     } catch (err: any) {
       console.error('[admin-review] upload-receipt unexpected error:', err);
-      Alert.alert('Error', 'Something went wrong. Please try again.');
+      const msg = getErrorMessageForUser(err, null, hasAdminAccess, language === 'ar' ? 'ar' : 'ckb');
+      Alert.alert(hasAdminAccess ? 'Error' : t('error'), msg);
     } finally {
       setSubmitting(false);
     }
@@ -151,7 +149,7 @@ export const TransactionIdInput: React.FC<TransactionIdInputProps> = ({
         activeOpacity={0.8}
       >
         <Text style={styles.tutorialButtonText}>
-          {isRTL ? 'کلیک بکە بۆ فێرکاری' : 'Click here for Tutorial'}
+          {isRTL ? 'گرتە بکە بۆ فێرکاری' : 'Click here for Tutorial'}
         </Text>
       </TouchableOpacity>
 
@@ -275,19 +273,11 @@ export const TransactionIdInput: React.FC<TransactionIdInputProps> = ({
         style={styles.helpButton}
         onPress={() => {
           // Navigate to tutorial - you may need to adjust navigation
-          Alert.alert(
-            isRTL ? 'چۆن پارە بدەم؟' : 'How to Pay?',
-            isRTL
-              ? 'بۆ زانینی زیاتر سەردانی بەشی فێرکاری بکە.'
-              : 'Visit the Tutorial section for more information.',
-            [{ text: isRTL ? 'باشە' : 'OK' }]
-          );
+          Alert.alert(t('howToPay'), t('visitTutorialForInfo'), [{ text: t('ok') }]);
         }}
       >
         <HelpCircle size={16} color={colors.primary.DEFAULT} />
-        <Text style={styles.helpButtonText}>
-          {isRTL ? 'چۆن پارە بدەم؟' : 'How to pay? / چۆن پارە بدەم؟'}
-        </Text>
+        <Text style={styles.helpButtonText}>{t('howToPay')}</Text>
       </TouchableOpacity>
     </View>
   );
@@ -334,7 +324,7 @@ const createStyles = (colors: any, isRTL: boolean) => {
     marginBottom: spacing.sm,
   },
   tutorialButton: {
-    alignSelf: isRTL ? 'flex-end' : 'flex-start',
+    alignSelf: 'flex-start',
     paddingVertical: 8,
     paddingHorizontal: 14,
     borderRadius: 10,

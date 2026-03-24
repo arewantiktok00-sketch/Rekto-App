@@ -14,11 +14,10 @@ import { supabase } from '@/integrations/supabase/client';
 import { getOwnerColors } from '@/theme/colors';
 import { inputStyleRTL } from '@/utils/rtl';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { toast } from '@/utils/toast';
 import { spacing, borderRadius } from '@/theme/spacing';
 import { getTypographyStyles } from '@/theme/typography';
 import { Text } from '@/components/common/Text';
-
-const SUPABASE_URL = 'https://uivgyexyakfincwgghgh.supabase.co';
 
 interface Advertiser {
   id: string;
@@ -43,7 +42,7 @@ interface EditedButtons {
 export function InteractiveButtonsTab() {
   const insets = useSafeAreaInsets();
   const themeColors = getOwnerColors();
-  const { isRTL } = useLanguage();
+  const { t, isRTL } = useLanguage();
   const colors = themeColors;
   const typography = getTypographyStyles('ckb');
   const styles = createStyles(colors, insets, typography, isRTL);
@@ -60,27 +59,10 @@ export function InteractiveButtonsTab() {
   const fetchAdvertisers = async () => {
     try {
       setLoading(true);
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
-      if (!token) {
-        Alert.alert('Error', 'Not authenticated');
-        return;
-      }
-      const response = await fetch(
-        `${SUPABASE_URL}/functions/v1/owner-advertisers-core`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          body: JSON.stringify({ action: 'list' }),
-        }
-      );
-      if (!response.ok) {
-        throw new Error('Failed to fetch advertisers');
-      }
-      const data = await response.json();
+      const { data, error } = await supabase.functions.invoke('owner-advertisers-core', {
+        body: { action: 'list' },
+      });
+      if (error) throw error;
       const fetchedAdvertisers = (data.advertisers || []) as Advertiser[];
       setAdvertisers(fetchedAdvertisers);
       const initialEdited: EditedButtons = {};
@@ -94,7 +76,7 @@ export function InteractiveButtonsTab() {
       setEditedButtons(initialEdited);
     } catch (error: any) {
       console.error('Error fetching advertisers:', error);
-      Alert.alert('Error', error.message || 'Failed to load advertisers');
+      toast.error(t('error'), t('somethingWentWrong'));
     } finally {
       setLoading(false);
     }
@@ -155,33 +137,16 @@ export function InteractiveButtonsTab() {
     try {
       setSavingId(advertiser.advertiser_id);
       const buttons = editedButtons[advertiser.advertiser_id];
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
-      if (!token) {
-        Alert.alert('Error', 'Not authenticated');
-        return;
-      }
-      const response = await fetch(
-        `${SUPABASE_URL}/functions/v1/owner-advertisers-buttons`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            action: 'updateInteractiveButtons',
-            id: advertiser.id,
-            interactive_button_kurdish: buttons.kurdish.trim() || null,
-            interactive_button_arabic: buttons.arabic.trim() || null,
-            interactive_button_all: buttons.all.trim() || null,
-          }),
-        }
-      );
-      if (!response.ok) {
-        throw new Error('Failed to save');
-      }
-      const data = await response.json();
+      const { data, error } = await supabase.functions.invoke('owner-advertisers-buttons', {
+        body: {
+          action: 'updateInteractiveButtons',
+          id: advertiser.id,
+          interactive_button_kurdish: buttons.kurdish.trim() || null,
+          interactive_button_arabic: buttons.arabic.trim() || null,
+          interactive_button_all: buttons.all.trim() || null,
+        },
+      });
+      if (error) throw error;
       if (data.success) {
         Alert.alert(
           'Saved',
@@ -193,7 +158,7 @@ export function InteractiveButtonsTab() {
       }
     } catch (error: any) {
       console.error('Error saving buttons:', error);
-      Alert.alert('Error', error.message || 'Failed to save button IDs');
+      toast.error(t('error'), t('somethingWentWrong'));
     } finally {
       setSavingId(null);
     }
@@ -499,7 +464,7 @@ const createStyles = (colors: any, insets: any, typography: any, isRTL?: boolean
       paddingVertical: spacing.sm,
       paddingHorizontal: spacing.md,
       borderRadius: borderRadius.sm,
-      alignSelf: isRTL ? 'flex-start' : 'flex-end',
+      alignSelf: 'flex-end',
       minWidth: 100,
     },
     saveButtonDisabled: {

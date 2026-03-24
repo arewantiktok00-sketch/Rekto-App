@@ -22,7 +22,7 @@ export interface TypographyStyles {
 /**
  * Get typography styles based on language
  * English uses Poppins font family, Kurdish/Arabic uses Rabar_021
- * Note: Fonts must be loaded via expo-font in App.tsx
+ * Note: Fonts are linked natively (Info.plist UIAppFonts).
  */
 export const getTypographyStyles = (language: 'ckb' | 'ar'): TypographyStyles => {
   const isRTL = true;

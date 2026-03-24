@@ -1,1 +1,1 @@
-export { supabase, supabaseRead, supabaseMirror, safeQuery } from '@/lib/supabase';
+export { supabase, supabaseRead, safeQuery } from '@/lib/supabase';

@@ -7,15 +7,17 @@ import { normalizePhoneToE164 } from '@/utils/phone';
 import { inputStyleRTL } from '@/utils/rtl';
 import { toast } from '@/utils/toast';
 import { useNavigation } from '@react-navigation/native';
-import { LinearGradient } from 'expo-linear-gradient';
+import LinearGradient from 'react-native-linear-gradient';
 import React, { useState } from 'react';
 import { KeyboardAvoidingView, Platform, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export function ForgotPasswordPhone() {
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
   const { t } = useLanguage();
   const { colors } = useTheme();
-  const styles = createStyles(colors);
+  const styles = createStyles(colors, insets);
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
@@ -50,18 +52,14 @@ export function ForgotPasswordPhone() {
 
       // Check for rate limiting
       if (data?.hasValidToken && data?.cooldown) {
-        const waitMinutes = Math.ceil(data.cooldown / 60);
-        toast.info(
-          'Please Wait',
-          `Please wait ${waitMinutes} minutes before requesting a new code`
-        );
+        toast.info(t('pleaseWait'), t('pleaseWaitMinutes'));
         return;
       }
 
       setSent(true);
-      toast.success('Reset Code Sent', `Code sent via ${data?.method || 'WhatsApp'}`);
+      toast.success(t('codeSent'), t('codeSentViaWhatsApp'));
     } catch (error: any) {
-      toast.error('Error', error.message || 'Failed to send reset code');
+      toast.error(t('error'), t('couldNotSendCode'));
     } finally {
       setLoading(false);
     }
@@ -69,8 +67,8 @@ export function ForgotPasswordPhone() {
 
   if (sent) {
     return (
-      <View style={styles.container}>
-        <View style={styles.content}>
+      <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+        <View style={styles.contentSent}>
           <Text style={styles.title}>Check Your Phone</Text>
           <Text style={styles.subtitle}>
             We've sent a reset code to {phone}
@@ -153,7 +151,7 @@ export function ForgotPasswordPhone() {
   );
 }
 
-const createStyles = (colors: any) => StyleSheet.create({
+const createStyles = (colors: any, insets: { top: number; bottom: number }) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background.DEFAULT,
@@ -161,7 +159,14 @@ const createStyles = (colors: any) => StyleSheet.create({
   content: {
     flex: 1,
     justifyContent: 'center',
-    padding: spacing.screenPadding,
+    paddingHorizontal: spacing.screenPadding,
+    paddingTop: insets.top + spacing[6],
+    paddingBottom: insets.bottom + spacing[6],
+  },
+  contentSent: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.screenPadding,
   },
   title: {
     fontSize: 32,

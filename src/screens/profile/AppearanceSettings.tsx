@@ -1,16 +1,16 @@
-import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ScreenHeader } from '@/components/common/ScreenHeader';
+import { Text } from '@/components/common/Text';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { Check, Moon, Sun, Monitor } from 'lucide-react-native';
-import { spacing, borderRadius } from '@/theme/spacing';
+import { borderRadius, spacing } from '@/theme/spacing';
 import { getTypographyStyles } from '@/theme/typography';
+import { isRTL, rtlRow, rtlText } from '@/utils/rtl';
 import { toast } from '@/utils/toast';
-import { Text } from '@/components/common/Text';
-import { ScreenHeader } from '@/components/common/ScreenHeader';
-import { isRTL, rtlText, rtlRow } from '@/utils/rtl';
+import { useNavigation } from '@react-navigation/native';
+import { Check, Monitor, Moon, Sun } from 'lucide-react-native';
+import { useEffect, useState } from 'react';
+import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type Theme = 'light' | 'dark' | 'system';
 
@@ -31,7 +31,7 @@ export function AppearanceSettings() {
   const handleThemeChange = async (newTheme: Theme) => {
     setTheme(newTheme);
     await setThemeMode(newTheme);
-    toast.success('Saved', 'Theme updated');
+    toast.success(t('saved'), t('themeUpdated'));
   };
 
   const themes = [
@@ -73,7 +73,7 @@ export function AppearanceSettings() {
         <View style={{ paddingHorizontal: 16, width: '100%' }}>
         {/* Current Theme Card */}
         <View style={[styles.currentThemeCard, rtlRow(rtl)]}>
-          <View style={[styles.currentThemeIcon, rtl && styles.currentThemeIconRTL]}>
+          <View style={styles.currentThemeIcon}>
             <Sun size={20} color="#FAFAFA" />
           </View>
           <View style={styles.currentThemeContent}>
@@ -114,7 +114,7 @@ export function AppearanceSettings() {
                       {themeOption.description}
                     </Text>
                   </View>
-                  <View style={[styles.themeIconWrapper, rtl && styles.themeIconRTL]}>
+                  <View style={styles.themeIconWrapper}>
                     <Icon size={20} color={isSelected ? '#FAFAFA' : colors.foreground.muted} />
                   </View>
                 </>
@@ -167,12 +167,6 @@ const createStyles = (colors: any, insets: any, typography: any, rtl?: boolean) 
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: colors.background.DEFAULT,
-  },
-  headerRTL: {
-    flexDirection: 'row',
-  },
-  rowReverse: {
-    flexDirection: 'row',
   },
   textRTL: {
     textAlign: 'right',
@@ -246,10 +240,6 @@ const createStyles = (colors: any, insets: any, typography: any, rtl?: boolean) 
     justifyContent: 'center',
     marginEnd: spacing.md,
   },
-  currentThemeIconRTL: {
-    marginEnd: 0,
-    marginStart: spacing.md,
-  },
   currentThemeContent: {
     flex: 1,
   },
@@ -303,10 +293,6 @@ const createStyles = (colors: any, insets: any, typography: any, rtl?: boolean) 
     alignItems: 'center',
     justifyContent: 'center',
     marginEnd: spacing.md,
-  },
-  themeIconRTL: {
-    marginEnd: 0,
-    marginStart: spacing.md,
   },
   themeText: {
     flex: 1,

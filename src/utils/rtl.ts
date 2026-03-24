@@ -1,16 +1,19 @@
 /**
  * RTL helper for Kurdish/Arabic-only app.
+ * Layout is ALWAYS RTL for UI text; numbers stay LTR via helpers.
  */
 import { TextStyle, ViewStyle } from 'react-native';
-export const isRTL = (_lang: string): boolean => true;
+
+// App uses only ckb/ar, so force RTL layout regardless of I18nManager.
+export const isRTL = (_lang?: string): boolean => true;
 
 export const rtlText = (): TextStyle => ({
-  textAlign: 'left',
+  textAlign: 'right',
   writingDirection: 'rtl',
 });
 
 export const rtlInput = (): TextStyle & ViewStyle => ({
-  textAlign: 'left',
+  textAlign: 'right',
   writingDirection: 'rtl',
   paddingStart: 12,
   paddingEnd: 12,

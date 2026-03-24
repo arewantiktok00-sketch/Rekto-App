@@ -1,27 +1,131 @@
-import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
-import { useRoute, useNavigation } from '@react-navigation/native';
-import { Download } from 'lucide-react-native';
+import { ScreenHeader } from '@/components/common/ScreenHeader';
+import { Text } from '@/components/common/Text';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { supabaseRead } from '@/integrations/supabase/client';
+import { useRemoteConfig } from '@/contexts/RemoteConfigContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import { supabaseRead } from '@/integrations/supabase/client';
+import { usePricingConfig } from '@/hooks/usePricingConfig';
+import { calculateTax } from '@/lib/pricing';
 import { spacing, borderRadius } from '@/theme/spacing';
-import { format } from 'date-fns';
+import { formatIQDEnglish, formatUSDLatinDigitsOnly } from '@/utils/currency';
+import { getDisplayBudget } from '@/utils/campaignBudget';
+import { formatUTCDateOnlyLocal } from '@/utils/dateFormat';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import { Download } from 'lucide-react-native';
+import { useEffect, useState } from 'react';
+import { Alert, Image, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import RNHTMLtoPDF from 'react-native-html-to-pdf';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { calculateTax, USD_TO_IQD_RATE } from '@/lib/pricing';
-import { Text } from '@/components/common/Text';
-import { ScreenHeader } from '@/components/common/ScreenHeader';
-import * as Print from 'expo-print';
-import * as Sharing from 'expo-sharing';
+import Share from 'react-native-share';
+import { toast } from '@/utils/toast';
+
+/** Invoice data for PDF generation (matches web app) */
+interface InvoiceData {
+  invoiceNumber: string;
+  displayName: string;
+  campaignId: string;
+  adName: string;
+  startDate: string;
+  endDate: string;
+  budgetUSD: number;
+  taxUSD: number;
+  totalUSD: number;
+  totalIQD: number;
+  paymentMethod: string;
+  isSpecialOffer: boolean;
+}
+
+/** Build full HTML for PDF (matches web app; RTL, Kurdish labels) */
+function buildInvoiceHTML(invoice: InvoiceData): string {
+  const esc = (s: string) => String(s ?? '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return `
+<!DOCTYPE html>
+<html dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif; padding: 30px; direction: rtl; color: #1a1a1a; background: #ffffff; }
+    .header { text-align: center; margin-bottom: 24px; }
+    .header h1 { color: #7C3AED; font-size: 32px; letter-spacing: 2px; }
+    .header p { color: #666; font-size: 13px; margin-top: 6px; }
+    .info-grid { display: flex; justify-content: space-between; margin-bottom: 20px; }
+    .info-col { width: 48%; }
+    .info-col p { font-size: 13px; color: #666; margin-bottom: 4px; }
+    .info-col .name { color: #7C3AED; font-weight: 600; }
+    .divider { height: 3px; background: #7C3AED; margin: 20px 0; border-radius: 2px; }
+    .section-title { color: #7C3AED; font-size: 18px; font-weight: 700; text-align: right; margin-bottom: 12px; }
+    .row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #f0f0f0; }
+    .row .label { font-size: 13px; color: #666; }
+    .row .value { font-size: 15px; font-weight: 600; color: #1a1a1a; }
+    .row .value.mono { font-family: 'Courier New', monospace; }
+    .row .value.primary { color: #7C3AED; }
+    .row .value.green { color: #16A34A; }
+    .total-value { font-size: 22px; font-weight: 800; }
+    .promo-badge { background: rgba(124, 58, 237, 0.1); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; }
+    .promo-badge strong { color: #7C3AED; font-size: 14px; }
+    .ad-name-section { text-align: center; margin-top: 10px; }
+    .ad-name-section h2 { color: #7C3AED; font-size: 20px; margin-top: 6px; }
+    .footer { text-align: center; margin-top: 30px; padding: 14px; background: #f8f8f8; border-radius: 8px; font-size: 11px; color: #999; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>REKTO</h1>
+    <p>بازرگانەیەکەت بەرەو پێش ببە لەگەڵ ڕێکتۆ</p>
+  </div>
+  <div class="info-grid">
+    <div class="info-col"><p>بۆ: <span class="name">${esc(invoice.displayName)}</span></p><p>✉ info@rekto.net</p></div>
+    <div class="info-col" style="text-align: left;"><p>لە لایەن: <span class="name">Rekto</span></p><p>✉ info@rekto.net</p></div>
+  </div>
+  <div class="divider"></div>
+  <div class="row"><span class="label">ئایدی / ID</span><span class="value mono">${esc(invoice.campaignId.slice(0, 12))}...</span></div>
+  <div class="row"><span class="label">ڕێکەوت / Date of ads</span><span class="value">${esc(invoice.startDate)} - ${esc(invoice.endDate)}</span></div>
+  <div class="divider"></div>
+  <h3 class="section-title">پوختە</h3>
+  ${invoice.isSpecialOffer ? `<div class="promo-badge"><strong>✨ Special Offer Applied</strong> <span>ئۆفەری تایبەت</span></div>` : ''}
+  <div class="row"><span class="label">بودجە / Budget $</span><span class="value">$${invoice.budgetUSD.toFixed(2)}</span></div>
+  ${!invoice.isSpecialOffer ? `<div class="row"><span class="label">باج / Tax $</span><span class="value">$${invoice.taxUSD.toFixed(2)}</span></div><div class="row"><span class="label">کۆی گشتی / Total $</span><span class="value">$${invoice.totalUSD.toFixed(2)}</span></div>` : ''}
+  <div class="row"><span class="label">${invoice.isSpecialOffer ? 'نرخی تایبەت / Special Price IQD' : 'کۆی پارەی دراو / Total Paid IQD'}</span><span class="value total-value ${invoice.isSpecialOffer ? 'primary' : 'green'}">${invoice.totalIQD.toLocaleString()} IQD</span></div>
+  <div class="divider"></div>
+  <h3 class="section-title">زانیاری پارەدان</h3>
+  <div class="row"><span class="label">ڕێگەی پارەدان / Payment</span><span class="value">${esc(invoice.paymentMethod)}</span></div>
+  <div class="row"><span class="label">ژ.م پسوولە / Invoice #</span><span class="value mono">${esc(invoice.invoiceNumber)}</span></div>
+  <div class="divider"></div>
+  <div class="ad-name-section"><span class="label">ناوی سپۆنسەر / Ad Name</span><h2>${esc(invoice.adName)}</h2></div>
+  <div class="footer">© ${new Date().getFullYear()} Rekto - TikTok Advertising Platform</div>
+</body>
+</html>`;
+}
+
+/** CKB/AR only — no English for payment method description */
+function getPaymentMethodLabel(
+  method: string | undefined | null,
+  language: string
+): string {
+  const m = (method || '').toLowerCase().replace(/_/g, '');
+  const isAr = language === 'ar';
+  if (m.includes('wallet') || m === 'walletbalance') {
+    return isAr ? 'حساب الرصيد (الجزدان)' : 'ژمێرەی باڵانس (جزدان)';
+  }
+  if (m.includes('fib')) return isAr ? 'FIB' : 'FIB';
+  if (m.includes('fastpay')) return isAr ? 'فاست پاي' : 'فاستپەی';
+  if (m.includes('superqi') || m.includes('qi')) return isAr ? 'سوبر كي / كي كارد' : 'سوپەرکی / کی کارد';
+  if (m.includes('bank')) return isAr ? 'تحويل بنكي' : 'بەرەوەنەی بانکی';
+  return isAr ? 'تحويل بنكي' : 'بەرەوەنەی بانکی (FIB / فاستپەی / کی کارد)';
+}
 
 export function Invoice() {
   const route = useRoute();
-  const navigation = useNavigation();
+  const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { t, language, isRTL } = useLanguage();
+  const { isPaymentsHidden } = useRemoteConfig();
   const { colors } = useTheme();
+  const { exchange_rate } = usePricingConfig();
   const styles = createStyles(colors, insets, isRTL);
   const { id } = route.params as { id: string };
   const [loading, setLoading] = useState(true);
@@ -35,6 +139,16 @@ export function Invoice() {
       fetchInvoice();
     }
   }, [user, id]);
+
+  useEffect(() => {
+    if (isPaymentsHidden) {
+      navigation.goBack();
+    }
+  }, [isPaymentsHidden, navigation]);
+
+  if (isPaymentsHidden) {
+    return null;
+  }
 
   const fetchInvoice = async () => {
     try {
@@ -82,33 +196,105 @@ export function Invoice() {
   if (!campaign && loading) {
     return (
       <View style={styles.container}>
-        <ScreenHeader title={t('invoiceTitle') || 'Invoice'} onBack={() => navigation.goBack()} style={{ paddingTop: insets.top + 16 }} />
+        <ScreenHeader
+          title={language === 'ar' ? 'الفاتورة' : 'پسوولە'}
+          onBack={() => navigation.goBack()}
+          style={{ paddingTop: insets.top + 16 }}
+        />
+      </View>
+    );
+  }
+
+  // Disallow invoices for campaigns that are not yet approved/active/completed/paused
+  const status = String(campaign.status || '').toLowerCase();
+  const invoiceAllowedStatuses = ['active', 'completed', 'paused'];
+  if (!invoiceAllowedStatuses.includes(status)) {
+    return (
+      <View style={styles.container}>
+        <ScreenHeader
+          title={language === 'ar' ? 'الفاتورة' : 'پسوولە'}
+          onBack={() => navigation.goBack()}
+          style={{ paddingTop: insets.top + 16 }}
+        />
+        <View style={styles.errorContainer}>
+          <View style={styles.errorCard}>
+            <Text style={[styles.errorTitle, isRTL && styles.textRTL]}>
+              {language === 'ar' ? 'لا يمكن إنشاء الفاتورة بعد' : 'هێشتا ناتوانرێ پسوولە دروست بکرێت'}
+            </Text>
+            <Text style={[styles.errorSubtitle, isRTL && styles.textRTL]}>
+              {language === 'ar'
+                ? 'يجب أن تكون الحملة فعّالة أو مكتملة قبل إنشاء الفاتورة.'
+                : 'پێویستە کامپەین چالاک بێت یان تەواو بێت پێش دروستکردنی پسوولە.'}
+            </Text>
+            <TouchableOpacity
+              style={styles.errorButton}
+              onPress={() => navigation.navigate('Main' as never, { screen: 'Campaigns' } as never)}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.errorButtonText}>
+                {language === 'ar' ? 'العودة إلى الحملات' : 'گەڕانەوە بۆ کامپەینەکان'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </View>
     );
   }
 
   if (!campaign && !loading) {
     return (
-      <View style={styles.errorContainer}>
-        <Text style={styles.errorText}>Invoice not found</Text>
+      <View style={styles.container}>
+        <ScreenHeader
+          title={language === 'ar' ? 'الفاتورة' : 'پسوولە'}
+          onBack={() => navigation.goBack()}
+          style={{ paddingTop: insets.top + 16 }}
+        />
+        <View style={styles.errorContainer}>
+          <View style={styles.errorCard}>
+            <Text style={[styles.errorTitle, isRTL && styles.textRTL]}>
+              {language === 'ar' ? 'الفاتورة غير موجودة' : 'پسوولە نەدۆزرایەوە'}
+            </Text>
+            <Text style={[styles.errorSubtitle, isRTL && styles.textRTL]}>
+              {language === 'ar'
+                ? 'تحقق من الحملة أو جرّب مرة أخرى لاحقاً.'
+                : 'تکایە دڵنیابەرەوە لە کامپەین یان دواتر هەوڵ بدەوە.'}
+            </Text>
+            <TouchableOpacity
+              style={styles.errorButton}
+              onPress={() => navigation.navigate('Main' as never, { screen: 'Campaigns' } as never)}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.errorButtonText}>
+                {language === 'ar' ? 'العودة إلى الحملات' : 'گەڕانەوە بۆ کامپەینەکان'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </View>
     );
   }
 
-  // Calculate totals - use real_budget > target_spend > total_budget
-  const budgetUSD = Number(campaign.real_budget) || Number(campaign.target_spend) || Number(campaign.total_budget) || 0;
-  
-  // Calculate tax using centralized pricing module
-  const taxUSD = calculateTax(budgetUSD);
-  
-  // Total = Budget + Tax (tax is ADDED, not included)
+  // Display budget: target_spend ?? real_budget ?? total_budget ?? 0
+  const budgetUSD = getDisplayBudget(campaign);
+  const extensionAmountUSD = Number(campaign.extension_amount) || 0;
+
+  // Split base vs extension for display: base = total - extension (if extension exists)
+  const baseBudgetUSD = extensionAmountUSD > 0 ? Math.max(budgetUSD - extensionAmountUSD, 0) : budgetUSD;
+
+  // Calculate tax per chunk using centralized pricing module
+  const baseTaxUSD = calculateTax(baseBudgetUSD);
+  const extensionTaxUSD = extensionAmountUSD > 0 ? calculateTax(extensionAmountUSD) : 0;
+
+  // Overall totals (for final IQD + summary)
+  const taxUSD = baseTaxUSD + extensionTaxUSD;
   const totalUSD = budgetUSD + taxUSD;
   
-  // Convert to IQD with floor (no rounding up)
-  const totalIQD = Math.floor(totalUSD * USD_TO_IQD_RATE);
+  // Convert to IQD with floor (owner exchange rate)
+  const totalIQD = Math.floor(totalUSD * exchange_rate);
   
   const amountPaid = transaction ? Math.abs(Number(transaction.amount)) : totalUSD;
-  const paymentMethod = campaign.payment_method_used || transaction?.payment_method || 'FIB';
+  const paymentMethodRaw = campaign.payment_method_used || transaction?.payment_method || '';
+  const paymentMethodLabel = getPaymentMethodLabel(paymentMethodRaw, language as string);
   const customerContact = user?.email || user?.phone || profile?.email || '';
   
   // Generate invoice number in format: INV-EXAMPLE-001
@@ -131,168 +317,59 @@ export function Invoice() {
     endDate = startDate;
   }
 
+  // Display dates in local timezone (backend stores UTC)
   const formatDate = (dateString: string) => {
-    const parsed = new Date(dateString);
-    if (Number.isNaN(parsed.getTime())) return '';
-    return format(parsed, 'dd/MM/yyyy');
+    return formatUTCDateOnlyLocal(dateString);
   };
 
   const handleExportPdf = async () => {
     if (exporting || !campaign) return;
+    const allowedStatuses = ['active', 'completed', 'paused'];
+    const campaignStatus = String(campaign?.status ?? '').toLowerCase();
+    if (!allowedStatuses.includes(campaignStatus)) {
+      toast.error(language === 'ar' ? 'خطأ' : 'هەڵە', language === 'ar' ? 'الفاتورة غير متاحة لهذه الحالة' : 'پسوولە بۆ ئەم دۆخە بەردەست نییە');
+      return;
+    }
     setExporting(true);
     try {
-      const logoSource = Image.resolveAssetSource(require('../../../assets/images/logo.png'));
-      const logoUri = logoSource?.uri ? encodeURI(logoSource.uri) : '';
-      const html = `
-        <html>
-          <head>
-            <meta charset="utf-8" />
-            <style>
-              body { font-family: Arial, sans-serif; background: ${colors.background.DEFAULT}; color: ${colors.foreground.DEFAULT}; margin: 0; padding: 20px; }
-              .card { border: 1px solid ${colors.border.DEFAULT}; border-radius: 20px; overflow: hidden; }
-              .logoHeader { text-align: center; padding: 20px 20px 12px; }
-              .logo { height: 36px; width: 140px; object-fit: contain; }
-              .logoSubtitle { font-size: 12px; color: ${colors.foreground.muted}; margin-top: 8px; }
-              .logoSubtitleBold { color: ${colors.primary.DEFAULT}; font-weight: 600; }
-              .infoRow { display: flex; justify-content: space-between; padding: 12px 20px; }
-              .infoLabel { font-size: 14px; color: ${colors.foreground.muted}; }
-              .infoValue { color: ${colors.primary.DEFAULT}; font-weight: 600; }
-              .infoValueBold { color: ${colors.primary.DEFAULT}; font-weight: 700; }
-              .infoEmail { font-size: 12px; color: ${colors.foreground.muted}; margin-top: 4px; }
-              .sectionRow { padding: 12px 20px; }
-              .sectionHeader { display: flex; justify-content: space-between; margin-bottom: 6px; }
-              .sectionHeaderText { font-size: 14px; font-weight: 500; }
-              .sectionHeaderTextBold { font-size: 14px; font-weight: 700; }
-              .sectionHeaderTextRTL { font-size: 12px; color: ${colors.primary.DEFAULT}; }
-              .sectionValue { font-size: 14px; color: ${colors.foreground.DEFAULT}; }
-              .divider { height: 2px; background: ${colors.primary.DEFAULT}; margin: 8px 20px; position: relative; }
-              .divider:after { content: ''; position: absolute; left: 50%; transform: translateX(-50%) rotate(45deg); width: 8px; height: 8px; background: ${colors.primary.DEFAULT}; top: -3px; }
-              .summarySection, .paymentSection, .adNameSection { padding: 12px 20px; }
-              .summaryTitle, .paymentTitle { font-size: 14px; font-weight: 700; color: ${colors.primary.DEFAULT}; margin-bottom: 8px; text-align: right; }
-              .summaryItem { display: flex; justify-content: space-between; margin-bottom: 8px; }
-              .summaryItemLabel { font-size: 14px; color: ${colors.foreground.muted}; }
-              .summaryItemLabelRTL { font-size: 12px; color: #7C3AED; text-align: right; }
-              .summaryItemValue { font-size: 14px; font-weight: 700; color: #0A0A0F; }
-              .summaryItemValuePaid { color: #16A34A; }
-              .paymentItem { margin-bottom: 8px; }
-              .paymentItemLabel { font-size: 14px; color: #71717A; }
-              .paymentItemLabelRTL { font-size: 12px; color: #7C3AED; text-align: right; }
-              .paymentItemValue { font-size: 14px; font-weight: 700; color: #0A0A0F; }
-              .adNameLabel { font-size: 14px; color: #71717A; }
-              .adNameLabelRTL { font-size: 12px; color: #7C3AED; }
-              .adNameValue { font-size: 14px; font-weight: 700; color: #0A0A0F; margin-top: 6px; }
-              .footer { text-align: center; padding: 12px 20px 16px; font-size: 12px; color: #71717A; }
-            </style>
-          </head>
-          <body>
-            <div class="card">
-              <div class="logoHeader">
-                ${logoUri ? `<img class="logo" src="${logoUri}" />` : `<div style="font-size:24px;font-weight:700;color:#7C3AED">Rekto</div>`}
-                <div class="logoSubtitle">Grow your business with <span class="logoSubtitleBold">Rekto</span></div>
-              </div>
-
-              <div class="infoRow">
-                <div>
-                  <div class="infoLabel">To: <span class="infoValue">${profile?.full_name || 'Customer'}</span></div>
-                  ${customerContact ? `<div class="infoEmail">✉ ${customerContact}</div>` : ''}
-                </div>
-                <div style="text-align:right;">
-                  <div class="infoLabel">From: <span class="infoValueBold">Rekto</span></div>
-                  <div class="infoEmail">✉ info@rekto.net</div>
-                </div>
-              </div>
-
-              <div class="sectionRow">
-                <div class="sectionHeader">
-                  <div class="sectionHeaderText">ID</div>
-                  <div class="sectionHeaderTextRTL">ئایدی</div>
-                </div>
-                <div class="sectionValue">${invoiceNumber}</div>
-              </div>
-
-              <div class="sectionRow">
-                <div class="sectionHeader">
-                  <div class="sectionHeaderTextBold">Date of ads</div>
-                  <div class="sectionHeaderTextRTL">ڕێکەوت</div>
-                </div>
-                <div class="sectionValue">${formatDate(startDate)} - ${formatDate(endDate)}</div>
-              </div>
-
-              <div class="divider"></div>
-
-              <div class="summarySection">
-                <div class="summaryTitle">پوختە</div>
-                <div class="summaryItem">
-                  <div>
-                    <div class="summaryItemLabel">Budget $</div>
-                    <div class="summaryItemLabelRTL">بودجە</div>
-                  </div>
-                  <div class="summaryItemValue">$${budgetUSD.toFixed(2)}</div>
-                </div>
-                <div class="summaryItem">
-                  <div>
-                    <div class="summaryItemLabel">Tax $</div>
-                    <div class="summaryItemLabelRTL">باج</div>
-                  </div>
-                  <div class="summaryItemValue">$${taxUSD.toFixed(2)}</div>
-                </div>
-                <div class="summaryItem">
-                  <div>
-                    <div class="summaryItemLabel">Total $</div>
-                    <div class="summaryItemLabelRTL">کۆی گشتی</div>
-                  </div>
-                  <div class="summaryItemValue">$${totalUSD.toFixed(2)}</div>
-                </div>
-                <div class="summaryItem">
-                  <div>
-                    <div class="summaryItemLabel">Total IQD</div>
-                    <div class="summaryItemLabelRTL">کۆی گشتی (دینار)</div>
-                  </div>
-                  <div class="summaryItemValue">${totalIQD.toLocaleString()} IQD</div>
-                </div>
-                <div class="summaryItem">
-                  <div>
-                    <div class="summaryItemLabel">Total amount paid</div>
-                    <div class="summaryItemLabelRTL">کۆی گشتی دراو</div>
-                  </div>
-                  <div class="summaryItemValue summaryItemValuePaid">${totalIQD.toLocaleString()} IQD</div>
-                </div>
-              </div>
-
-              <div class="divider"></div>
-
-              <div class="paymentSection">
-                <div class="paymentTitle">زانیاری پارەدان</div>
-                <div class="paymentItem">
-                  <div class="paymentItemLabel">Which paid (${paymentMethod})</div>
-                  <div class="paymentItemLabelRTL">ڕێگەی پارەدان</div>
-                </div>
-                <div class="paymentItem">
-                  <div class="paymentItemLabel">Number of invoice</div>
-                  <div class="paymentItemLabelRTL">ژ.م پسوولە</div>
-                  <div class="paymentItemValue">${invoiceNumber}</div>
-                </div>
-              </div>
-
-              <div class="divider"></div>
-
-              <div class="adNameSection">
-                <div class="adNameLabel">Ad name</div>
-                <div class="adNameLabelRTL">ناوی سپۆنسەر</div>
-                <div class="adNameValue">${campaign.title}</div>
-              </div>
-
-              <div class="footer">© ${new Date().getFullYear()} Rekto - TikTok Advertising Platform</div>
-            </div>
-          </body>
-        </html>
-      `;
-      const { uri } = await Print.printToFileAsync({ html });
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri);
+      const invoice: InvoiceData = {
+        invoiceNumber,
+        displayName: profile?.full_name || (language === 'ar' ? 'العميل' : 'بەکارهێنەر'),
+        campaignId: campaign.id,
+        adName: campaign.title || '',
+        startDate: formatDate(startDate),
+        endDate: formatDate(endDate),
+        budgetUSD,
+        taxUSD,
+        totalUSD,
+        totalIQD,
+        paymentMethod: paymentMethodLabel,
+        isSpecialOffer: !!(campaign as any).payment_amount_iqd,
+      };
+      const htmlContent = buildInvoiceHTML(invoice);
+      const options = {
+        html: htmlContent,
+        fileName: invoice.invoiceNumber,
+        directory: 'Documents',
+        base64: false,
+        width: 612,
+        height: 792,
+      };
+      if (!(RNHTMLtoPDF as any)?.convert) {
+        throw new Error('RNHTMLtoPDF native module is not available in iOS binary');
       }
-    } catch (error) {
-      console.error('Failed to export invoice:', error);
+      const file = await (RNHTMLtoPDF as any).convert(options);
+      if (!file?.filePath) throw new Error('PDF generation failed');
+      await Share.open({
+        url: `file://${file.filePath}`,
+        type: 'application/pdf',
+        title: invoice.invoiceNumber,
+      });
+    } catch (err: any) {
+      if (err?.message?.includes('User did not share')) return;
+      console.error('PDF export error:', err);
+      const errMsg = language === 'ar' ? 'فشل إنشاء PDF. حاول مرة أخرى.' : language === 'ckb' ? 'دروستکردنی PDF سەرنەکەوت. دووبارە هەوڵ بدەرەوە.' : 'Failed to generate PDF. Please try again.';
+      Alert.alert(language === 'ar' ? 'خطأ' : language === 'ckb' ? 'هەڵە' : 'Error', errMsg);
     } finally {
       setExporting(false);
     }
@@ -301,13 +378,15 @@ export function Invoice() {
   return (
     <View style={styles.container}>
       <ScreenHeader
-        title={t('invoiceTitle') || 'Invoice'}
+        title={language === 'ar' ? 'الفاتورة' : 'پسوولە'}
         onBack={() => navigation.goBack()}
         style={{ paddingTop: insets.top + 16 }}
         rightElement={
-          <TouchableOpacity onPress={handleExportPdf} style={[styles.exportButton, isRTL && styles.rowReverse]} disabled={exporting} activeOpacity={0.8}>
+          <TouchableOpacity onPress={handleExportPdf} style={styles.exportButton} disabled={exporting} activeOpacity={0.8}>
             <Download size={18} color={colors.foreground.DEFAULT} />
-            <Text style={[styles.exportText, isRTL && styles.textRTL]} numberOfLines={1}>{exporting ? (t('loading') || 'Loading') : 'Export'}</Text>
+            <Text style={[styles.exportText, isRTL && styles.textRTL]} numberOfLines={1}>
+              {exporting ? (language === 'ar' ? 'جارٍ التحميل' : 'چاوەڕوان بە') : (language === 'ar' ? 'تصدير' : 'دابەزاندن')}
+            </Text>
           </TouchableOpacity>
         }
       />
@@ -325,8 +404,8 @@ export function Invoice() {
               style={styles.logoImage}
               resizeMode="contain"
             />
-            <Text style={styles.logoSubtitle}>
-              {isRTL ? 'بازرگانەیەکەت بەرەو پێش ببە لەگەڵ ' : 'Grow your business with '}
+            <Text style={[styles.logoSubtitle, styles.textRTL]}>
+              {language === 'ar' ? 'نمِّ عملك مع ' : 'بازرگانەیەکەت بەرەو پێش ببە لەگەڵ '}
               <Text style={styles.logoSubtitleBold}>Rekto</Text>
             </Text>
           </View>
@@ -334,14 +413,14 @@ export function Invoice() {
           {/* Customer & Rekto Info - Two Columns */}
           <View style={styles.infoRow}>
             <View style={styles.infoColumn}>
-              <Text style={styles.infoLabel}>
-                {isRTL ? 'بۆ :' : 'To:'} <Text style={styles.infoValue}>{profile?.full_name || 'Customer'}</Text>
+              <Text style={[styles.infoLabel, styles.textRTL]}>
+                {language === 'ar' ? 'إلى: ' : 'بۆ: '}<Text style={styles.infoValue}>{profile?.full_name || (language === 'ar' ? 'العميل' : 'بەکارهێنەر')}</Text>
               </Text>
               {!!customerContact && <Text style={styles.infoEmail}>✉ {customerContact}</Text>}
             </View>
             <View style={[styles.infoColumn, styles.infoColumnRight]}>
-              <Text style={styles.infoLabel}>
-                {isRTL ? 'لە لایەن:' : 'From:'} <Text style={styles.infoValueBold}>Rekto</Text>
+              <Text style={[styles.infoLabel, styles.textRTL]}>
+                {language === 'ar' ? 'من: ' : 'لە لایەن: '}<Text style={styles.infoValueBold}>Rekto</Text>
               </Text>
               <Text style={styles.infoEmail}>✉ info@rekto.net</Text>
             </View>
@@ -350,8 +429,7 @@ export function Invoice() {
           {/* ID Section */}
           <View style={styles.sectionRow}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionHeaderText}>ID</Text>
-              <Text style={styles.sectionHeaderTextRTL}>ئایدی</Text>
+              <Text style={[styles.sectionHeaderTextRTL, { fontWeight: '600' }]}>{language === 'ar' ? 'الرقم' : 'ئایدی'}</Text>
             </View>
             <Text style={styles.sectionValue}>{invoiceNumber}</Text>
           </View>
@@ -359,8 +437,9 @@ export function Invoice() {
           {/* Date of Ads Section */}
           <View style={styles.sectionRow}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionHeaderTextBold}>Date of ads</Text>
-              <Text style={styles.sectionHeaderTextRTL}>ڕێکەوت</Text>
+              <Text style={[styles.sectionHeaderTextRTL, { fontWeight: '700' }]}>
+                {language === 'ar' ? 'تواريخ الإعلان' : 'ڕێکەوتی ڕیکلام'}
+              </Text>
             </View>
             <Text style={styles.sectionValue}>
               {formatDate(startDate)} - {formatDate(endDate)}
@@ -379,43 +458,38 @@ export function Invoice() {
             
             <View style={styles.summaryItem}>
               <View style={styles.summaryItemHeader}>
-                <Text style={styles.summaryItemLabel}>Budget $</Text>
-                <Text style={styles.summaryItemLabelRTL}>بودجە</Text>
+                <Text style={styles.summaryItemLabelRTL}>{language === 'ar' ? 'الميزانية (USD)' : 'بودجە (USD)'}</Text>
               </View>
-              <Text style={styles.summaryItemValue}>${budgetUSD.toFixed(2)}</Text>
+              <Text style={styles.summaryItemValue}>{formatUSDLatinDigitsOnly(budgetUSD)}</Text>
             </View>
 
             <View style={styles.summaryItem}>
               <View style={styles.summaryItemHeader}>
-                <Text style={styles.summaryItemLabel}>Tax $</Text>
-                <Text style={styles.summaryItemLabelRTL}>باج</Text>
+                <Text style={styles.summaryItemLabelRTL}>{language === 'ar' ? 'الضريبة (USD)' : 'باج (USD)'}</Text>
               </View>
-              <Text style={styles.summaryItemValue}>${taxUSD.toFixed(2)}</Text>
+              <Text style={styles.summaryItemValue}>{formatUSDLatinDigitsOnly(taxUSD)}</Text>
             </View>
 
             <View style={styles.summaryItem}>
               <View style={styles.summaryItemHeader}>
-                <Text style={styles.summaryItemLabel}>Total $</Text>
-                <Text style={styles.summaryItemLabelRTL}>کۆی گشتی</Text>
+                <Text style={styles.summaryItemLabelRTL}>{language === 'ar' ? 'الإجمالي (USD)' : 'کۆی گشتی (USD)'}</Text>
               </View>
-              <Text style={styles.summaryItemValue}>${totalUSD.toFixed(2)}</Text>
+              <Text style={styles.summaryItemValue}>{formatUSDLatinDigitsOnly(totalUSD)}</Text>
             </View>
 
             <View style={styles.summaryItem}>
               <View style={styles.summaryItemHeader}>
-                <Text style={styles.summaryItemLabel}>Total IQD</Text>
-                <Text style={styles.summaryItemLabelRTL}>کۆی گشتی (دینار)</Text>
+                <Text style={styles.summaryItemLabelRTL}>{language === 'ar' ? 'الإجمالي (دينار)' : 'کۆی گشتی (دینار)'}</Text>
               </View>
-              <Text style={styles.summaryItemValue}>{totalIQD.toLocaleString()} IQD</Text>
+              <Text style={styles.summaryItemValue}>{formatIQDEnglish(totalIQD)}</Text>
             </View>
 
             <View style={styles.summaryItem}>
               <View style={styles.summaryItemHeader}>
-                <Text style={styles.summaryItemLabel}>Total amount paid</Text>
-                <Text style={styles.summaryItemLabelRTL}>کۆی گشتی دراو</Text>
+                <Text style={styles.summaryItemLabelRTL}>{language === 'ar' ? 'المبلغ المدفوع' : 'کۆی گشتی دراو'}</Text>
               </View>
               <Text style={[styles.summaryItemValue, styles.summaryItemValuePaid]}>
-                {totalIQD.toLocaleString()} IQD
+                {formatIQDEnglish(totalIQD)}
               </Text>
             </View>
           </View>
@@ -432,15 +506,16 @@ export function Invoice() {
             
             <View style={styles.paymentItem}>
               <View style={styles.paymentItemHeader}>
-                <Text style={styles.paymentItemLabel}>Which paid ({paymentMethod})</Text>
-                <Text style={styles.paymentItemLabelRTL}>ڕێگەی پارەدان</Text>
+                <Text style={styles.paymentItemLabelRTL}>
+                  {language === 'ar' ? 'طريقة الدفع: ' : 'ڕێگەی پارەدان: '}
+                  {paymentMethodLabel}
+                </Text>
               </View>
             </View>
 
             <View style={styles.paymentItem}>
               <View style={styles.paymentItemHeader}>
-                <Text style={styles.paymentItemLabel}>Number of invoice</Text>
-                <Text style={styles.paymentItemLabelRTL}>ژ.م پسوولە</Text>
+                <Text style={styles.paymentItemLabelRTL}>{language === 'ar' ? 'رقم الفاتورة' : 'ژمارەی پسوولە'}</Text>
               </View>
               <Text style={styles.paymentItemValue}>{invoiceNumber}</Text>
             </View>
@@ -455,16 +530,15 @@ export function Invoice() {
           {/* Ad Name Section */}
           <View style={styles.adNameSection}>
             <View style={styles.adNameHeader}>
-              <Text style={styles.adNameLabel}>Ad name</Text>
-              <Text style={styles.adNameLabelRTL}>ناوی سپۆنسەر</Text>
+              <Text style={styles.adNameLabelRTL}>{language === 'ar' ? 'اسم الإعلان' : 'ناوی ڕیکلام'}</Text>
             </View>
             <Text style={styles.adNameValue}>{campaign.title}</Text>
           </View>
 
           {/* Footer */}
           <View style={styles.footer}>
-            <Text style={styles.footerText}>
-              © {new Date().getFullYear()} Rekto - TikTok Advertising Platform
+            <Text style={[styles.footerText, styles.textRTL]}>
+              © {new Date().getFullYear()} Rekto — {language === 'ar' ? 'إعلانات تيك توك' : 'ڕیکلامی تیکتۆک'}
             </Text>
           </View>
         </View>
@@ -472,6 +546,8 @@ export function Invoice() {
     </View>
   );
 }
+
+export default Invoice;
 
 const createStyles = (colors: any, insets: any, isRTL: boolean) => StyleSheet.create({
   container: {
@@ -488,11 +564,41 @@ const createStyles = (colors: any, insets: any, isRTL: boolean) => StyleSheet.cr
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: colors.card.background,
+    paddingHorizontal: spacing.lg,
   },
-  errorText: {
+  errorCard: {
+    width: '100%',
+    borderRadius: 20,
+    padding: spacing.lg,
+    backgroundColor: colors.card.background,
+    borderWidth: 1,
+    borderColor: colors.border.DEFAULT,
+  },
+  errorTitle: {
     fontSize: 18,
-    color: '#EF4444',
+    fontWeight: '700',
+    color: colors.foreground.DEFAULT,
+    marginBottom: spacing.sm,
+    textAlign: 'center',
+  },
+  errorSubtitle: {
+    fontSize: 14,
+    color: colors.foreground.muted,
+    textAlign: 'center',
+    marginBottom: spacing.lg,
+  },
+  errorButton: {
+    marginTop: spacing.md,
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.button,
+    backgroundColor: colors.primary.DEFAULT,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  errorButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.primary.foreground,
   },
   header: {
     flexDirection: 'row',
@@ -506,9 +612,6 @@ const createStyles = (colors: any, insets: any, isRTL: boolean) => StyleSheet.cr
     borderBottomColor: colors.border.DEFAULT,
   },
   headerRTL: {
-    flexDirection: 'row',
-  },
-  rowReverse: {
     flexDirection: 'row',
   },
   textRTL: {
@@ -660,6 +763,9 @@ const createStyles = (colors: any, insets: any, isRTL: boolean) => StyleSheet.cr
     fontSize: 14,
     color: colors.foreground.DEFAULT,
     fontFamily: 'monospace',
+    textAlign: 'right',
+    alignSelf: 'flex-end',
+    marginTop: spacing.xs,
   },
   dividerContainer: {
     position: 'relative',
@@ -701,7 +807,7 @@ const createStyles = (colors: any, insets: any, isRTL: boolean) => StyleSheet.cr
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.xs,
+    marginBottom: spacing.sm,
   },
   summaryItemLabel: {
     fontSize: 14,
@@ -715,6 +821,9 @@ const createStyles = (colors: any, insets: any, isRTL: boolean) => StyleSheet.cr
     fontSize: 18,
     fontWeight: '700',
     color: colors.foreground.DEFAULT,
+    textAlign: 'right',
+    alignSelf: 'flex-end',
+    marginTop: spacing.xs,
   },
   summaryItemValuePaid: {
     color: colors.success,
@@ -738,7 +847,7 @@ const createStyles = (colors: any, insets: any, isRTL: boolean) => StyleSheet.cr
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.xs,
+    marginBottom: spacing.sm,
   },
   paymentItemLabel: {
     fontSize: 14,
@@ -752,6 +861,9 @@ const createStyles = (colors: any, insets: any, isRTL: boolean) => StyleSheet.cr
     fontSize: 14,
     color: colors.foreground.DEFAULT,
     fontFamily: 'monospace',
+    textAlign: 'right',
+    alignSelf: 'flex-end',
+    marginTop: spacing.xs,
   },
   adNameSection: {
     paddingHorizontal: spacing.lg,

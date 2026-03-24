@@ -1,18 +1,18 @@
-import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, Switch, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ScreenHeader } from '@/components/common/ScreenHeader';
+import { Text } from '@/components/common/Text';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { supabase } from '@/integrations/supabase/client';
-import { Bell } from 'lucide-react-native';
 import { useTheme } from '@/contexts/ThemeContext';
-import { LinearGradient } from 'expo-linear-gradient';
-import { spacing, borderRadius } from '@/theme/spacing';
+import { supabase } from '@/integrations/supabase/client';
+import { borderRadius, spacing } from '@/theme/spacing';
+import { isRTL, rtlRow, rtlText } from '@/utils/rtl';
 import { toast } from '@/utils/toast';
-import { Text } from '@/components/common/Text';
-import { ScreenHeader } from '@/components/common/ScreenHeader';
-import { isRTL, rtlText, rtlRow } from '@/utils/rtl';
+import { useNavigation } from '@react-navigation/native';
+import { Bell } from 'lucide-react-native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, Switch, TouchableOpacity, View } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export function NotificationSettings() {
   const navigation = useNavigation();
@@ -90,9 +90,9 @@ export function NotificationSettings() {
         if (error) throw error;
       }
 
-      toast.success('Saved', 'Notification settings updated');
+      toast.success(t('saved'), t('notificationSettingsUpdated'));
     } catch (error: any) {
-      toast.error('Error', error.message || 'Failed to save settings');
+      toast.error(t('error'), t('failedToSaveSettings'));
     } finally {
       setSaving(false);
     }
@@ -211,9 +211,6 @@ const createStyles = (colors: any, insets: { top: number; bottom: number }, rtl?
   headerRTL: {
     flexDirection: 'row',
   },
-  rowReverse: {
-    flexDirection: 'row',
-  },
   textRTL: {
     textAlign: 'right',
     writingDirection: 'rtl',
@@ -256,7 +253,7 @@ const createStyles = (colors: any, insets: { top: number; bottom: number }, rtl?
   headerLeftSlot: {
     minWidth: 100,
     maxWidth: 100,
-    alignItems: rtl ? 'flex-end' : 'flex-start',
+    alignItems: 'flex-start',
     justifyContent: 'center',
   },
   headerRightSlot: {

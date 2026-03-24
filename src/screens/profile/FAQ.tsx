@@ -1,17 +1,18 @@
-import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Animated } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ScreenHeader } from '@/components/common/ScreenHeader';
+import { Text } from '@/components/common/Text';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { isRTL, rtlText, rtlRow } from '@/utils/rtl';
-import { ChevronDown, ChevronUp, HelpCircle } from 'lucide-react-native';
+import { useRemoteConfig } from '@/contexts/RemoteConfigContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { spacing, borderRadius } from '@/theme/spacing';
+import { safeQuery, supabase } from '@/integrations/supabase/client';
+import { borderRadius, spacing } from '@/theme/spacing';
 import { getTypographyStyles } from '@/theme/typography';
 import { getFontFamilyByLanguage } from '@/utils/fonts';
-import { supabase, safeQuery } from '@/integrations/supabase/client';
-import { Text } from '@/components/common/Text';
-import { ScreenHeader } from '@/components/common/ScreenHeader';
+import { isRTL, rtlRow, rtlText } from '@/utils/rtl';
+import { useNavigation } from '@react-navigation/native';
+import { ChevronDown, HelpCircle } from 'lucide-react-native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Animated, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface FAQItem {
   id: string;
@@ -23,6 +24,7 @@ export function FAQPage() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { t, language } = useLanguage();
+  const { isPaymentsHidden } = useRemoteConfig();
   const rtl = isRTL(language);
   const { colors } = useTheme();
   const typography = getTypographyStyles(language as 'ckb' | 'ar');
@@ -55,7 +57,7 @@ export function FAQPage() {
         } else if (language === 'ar' && faq.question_ar) {
           question = faq.question_ar;
         } else {
-          question = faq.question_en || '';
+          question = faq.question_ckb || faq.question_ar || '';
         }
         
         if (language === 'ckb' && faq.answer_ckb) {
@@ -63,7 +65,7 @@ export function FAQPage() {
         } else if (language === 'ar' && faq.answer_ar) {
           answer = faq.answer_ar;
         } else {
-          answer = faq.answer_en || '';
+          answer = faq.answer_ckb || faq.answer_ar || '';
         }
         
         return {
@@ -225,20 +227,22 @@ export function FAQPage() {
         )}
 
         {/* Contact Us footer */}
-        <View style={styles.footer}>
-          <Text style={[styles.footerText, rtlText(rtl)]}>
-            {t('faqCantFind') || "Couldn't find your answer?"}
-          </Text>
-          <TouchableOpacity
-            onPress={() => {
-              navigation.navigate('ProfileStack', { screen: 'HelpSupport' });
-            }}
-          >
-            <Text style={[styles.footerLink, rtlText(rtl)]}>
-              {t('contactUs') || 'Contact Us'}
+        {!isPaymentsHidden && (
+          <View style={styles.footer}>
+            <Text style={[styles.footerText, rtlText(rtl)]}>
+              {t('faqCantFind') || "Couldn't find your answer?"}
             </Text>
-          </TouchableOpacity>
-        </View>
+            <TouchableOpacity
+              onPress={() => {
+                navigation.navigate('ProfileStack', { screen: 'HelpSupport' });
+              }}
+            >
+              <Text style={[styles.footerLink, rtlText(rtl)]}>
+                {t('contactUs') || 'Contact Us'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
         </View>
       </ScrollView>
     </View>
@@ -261,9 +265,6 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     backgroundColor: colors.background.DEFAULT,
   },
   headerRTL: {
-    flexDirection: 'row',
-  },
-  rowReverse: {
     flexDirection: 'row',
   },
   textRTL: {

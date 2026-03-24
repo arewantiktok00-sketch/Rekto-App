@@ -1,6 +1,7 @@
 import { Text } from '@/components/common/Text';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useRemoteConfig } from '@/contexts/RemoteConfigContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { supabase } from '@/integrations/supabase/client';
 import { borderRadius, spacing } from '@/theme/spacing';
@@ -8,17 +9,20 @@ import { normalizePhoneToE164 } from '@/utils/phone';
 import { iconTransformRTL, inputStyleRTL } from '@/utils/rtl';
 import { toast } from '@/utils/toast';
 import { useNavigation } from '@react-navigation/native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { ArrowLeft, Globe2, MessageCircle, Phone as PhoneIcon } from 'lucide-react-native';
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export function PhoneLogin() {
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
   const { t, language, isRTL } = useLanguage();
+  const { isPaymentsHidden } = useRemoteConfig();
   const { checkBlockedStatus } = useAuth();
   const { colors } = useTheme();
-  const styles = createStyles(colors, isRTL);
+  const styles = createStyles(colors, insets, isRTL);
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -39,13 +43,13 @@ export function PhoneLogin() {
 
   const handleLogin = async () => {
     if (!phone || !password) {
-      toast.warning('Required', 'Please enter phone and password');
+      toast.warning(t('required'), t('pleaseEnterPhoneAndPassword'));
       return;
     }
 
     const normalizedPhone = normalizePhoneToE164(phone);
     if (!normalizedPhone) {
-      toast.warning('Invalid phone', 'Please enter a valid phone number');
+      toast.warning(t('required'), t('invalidPhoneNumber'));
       return;
     }
 
@@ -72,7 +76,7 @@ export function PhoneLogin() {
         }
 
         if (data?.needsVerification) {
-          toast.info('Verification required', 'Please verify your phone number');
+          toast.info(t('verificationRequired'), t('pleaseVerifyPhoneNumber'));
           navigation.navigate('Auth', {
             screen: 'VerifyCode',
             params: { phoneNumber: normalizedPhone, method: 'phone', purpose: 'login' },
@@ -80,7 +84,7 @@ export function PhoneLogin() {
           return;
         }
 
-        toast.error('Login failed', data?.error || 'Invalid phone or password');
+        toast.error(t('loginFailed'), data?.error || t('wrongPhoneOrPassword'));
         return;
       }
 
@@ -106,7 +110,7 @@ export function PhoneLogin() {
         return;
       }
     } catch (err: any) {
-      toast.error('Error', err.message || 'Login failed');
+      toast.error(t('error'), t('wrongPhoneOrPassword'));
     } finally {
       setLoading(false);
     }
@@ -124,7 +128,7 @@ export function PhoneLogin() {
         showsVerticalScrollIndicator={false}
       >
         {/* Top bar */}
-        <View style={[styles.topBar, isRTL && styles.topBarRTL]}>
+        <View style={styles.topBar}>
           <TouchableOpacity
             style={styles.iconButton}
             onPress={() => navigation.canGoBack() && navigation.goBack()}
@@ -137,14 +141,14 @@ export function PhoneLogin() {
             <Text style={[styles.logoText, isRTL && styles.textRTL]}>rekto</Text>
           </View>
 
-          <View style={[styles.languageBadge, isRTL && styles.rowReverse]}>
+          <View style={styles.languageBadge}>
             <Globe2 size={16} color={colors.foreground.muted} />
             <Text style={[styles.languageText, isRTL && styles.textRTL]}>{language.toUpperCase()}</Text>
           </View>
         </View>
 
         {/* Heading */}
-        <View style={[styles.headingRow, isRTL && styles.rowReverse]}>
+        <View style={styles.headingRow}>
           <View style={styles.headingIcon}>
             <PhoneIcon size={18} color="#fff" />
           </View>
@@ -156,7 +160,7 @@ export function PhoneLogin() {
 
         {/* Phone field */}
         <Text style={[styles.fieldLabel, isRTL && styles.textRTL]}>{t('phoneNumber') || 'Phone Number'}</Text>
-        <View style={[styles.phoneRow, isRTL && styles.rowReverse]}>
+        <View style={styles.phoneRow}>
           <TouchableOpacity style={styles.countrySelector} activeOpacity={0.9}>
             <Text style={[styles.countryCodeText, isRTL && styles.textRTL]}>IQ +964</Text>
           </TouchableOpacity>
@@ -209,7 +213,7 @@ export function PhoneLogin() {
         </TouchableOpacity>
 
         {/* Divider */}
-        <View style={[styles.dividerRow, isRTL && styles.rowReverse]}>
+        <View style={styles.dividerRow}>
           <View style={styles.dividerLine} />
           <Text style={[styles.dividerText, isRTL && styles.textRTL]}>{t('or') || 'or'}</Text>
           <View style={styles.dividerLine} />
@@ -217,7 +221,7 @@ export function PhoneLogin() {
 
         {/* Continue with Email */}
         <TouchableOpacity
-          style={[styles.secondaryButton, isRTL && styles.rowReverse]}
+          style={styles.secondaryButton}
           onPress={() => navigation.navigate('Auth', { screen: 'Login' })}
           activeOpacity={0.85}
         >
@@ -227,25 +231,27 @@ export function PhoneLogin() {
         </TouchableOpacity>
 
         {/* Bottom links */}
-        <View style={[styles.footer, isRTL && styles.rowReverse]}>
+        <View style={styles.footer}>
           <Text style={[styles.footerText, isRTL && styles.textRTL]}>{t('dontHaveAccount') || "Don't have an account?"} </Text>
           <TouchableOpacity onPress={() => navigation.navigate('Auth', { screen: 'SignUp' })}>
             <Text style={[styles.footerLink, isRTL && styles.textRTL]}>{t('signUp') || 'Sign Up'}</Text>
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity
-          style={[styles.helpContainer, isRTL && styles.rowReverse]}
-          activeOpacity={0.8}
-          onPress={() => Linking.openURL('https://wa.me/9647504881516')}
-        >
-          <MessageCircle size={16} color={colors.foreground.muted} />
-          <Text style={[styles.helpText, isRTL && styles.textRTL]}>
-            {t('needHelpChatWithUs') || 'Chat with us on WhatsApp'}
-          </Text>
-        </TouchableOpacity>
+        {!isPaymentsHidden && (
+          <TouchableOpacity
+            style={styles.helpContainer}
+            activeOpacity={0.8}
+            onPress={() => Linking.openURL('https://wa.me/9647504881516')}
+          >
+            <MessageCircle size={16} color={colors.foreground.muted} />
+            <Text style={[styles.helpText, isRTL && styles.textRTL]}>
+              {t('needHelpChatWithUs') || 'Chat with us on WhatsApp'}
+            </Text>
+          </TouchableOpacity>
+        )}
 
-        <View style={[styles.termsContainer, isRTL && styles.rowReverse]}>
+        <View style={styles.termsContainer}>
           <Text style={[styles.termsText, isRTL && styles.textRTL]}>
             {t('termsAgreement') || 'By signing in, you agree to our'}{' '}
             <Text style={[styles.termsLink, isRTL && styles.textRTL]} onPress={() => (navigation.getParent() as any)?.navigate('Terms')}>
@@ -262,10 +268,8 @@ export function PhoneLogin() {
   );
 }
 
-const createStyles = (colors: any, isRTL?: boolean) => StyleSheet.create({
-  rowReverse: { flexDirection: 'row' },
+const createStyles = (colors: any, insets: { top: number; bottom: number }, isRTL?: boolean) => StyleSheet.create({
   textRTL: { textAlign: 'right', writingDirection: 'rtl' },
-  topBarRTL: { flexDirection: 'row' },
   container: {
     flex: 1,
     backgroundColor: colors.background.DEFAULT,
@@ -275,7 +279,8 @@ const createStyles = (colors: any, isRTL?: boolean) => StyleSheet.create({
     justifyContent: 'flex-start',
     paddingStart: spacing.screenPadding,
     paddingEnd: spacing.screenPadding,
-    paddingVertical: spacing[6],
+    paddingTop: insets.top + spacing[6],
+    paddingBottom: insets.bottom + spacing[6],
   },
   topBar: {
     flexDirection: 'row',

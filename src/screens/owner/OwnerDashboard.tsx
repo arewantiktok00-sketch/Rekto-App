@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Modal, StatusBar, I18nManager } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Modal, StatusBar } from 'react-native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
 import { LogOut, Wifi, CheckCircle2, AlertTriangle, Menu, X } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -32,28 +31,31 @@ import { FeaturedAdManager } from '@/components/owner/FeaturedAdManager';
 import { AnnouncementManager } from '@/components/owner/AnnouncementManager';
 import { AdminReviewersScreen } from '@/screens/owner/AdminReviewersScreen';
 import { BannerContentManager } from '@/screens/owner/BannerContentManager';
+import { BalanceTab } from '@/components/owner/BalanceTab';
+import { TransactionLogsTab } from '@/components/owner/TransactionLogsTab';
+import { BackButton } from '@/components/common/BackButton';
 import { Text } from '@/components/common/Text';
 import { OwnerDrawerNav } from '@/components/owner/OwnerDrawerNav';
-import { LinearGradient } from 'expo-linear-gradient';
-import { DollarSign, Tag } from 'lucide-react-native';
+import LinearGradient from 'react-native-linear-gradient';
+import { DollarSign, Tag, Wallet } from 'lucide-react-native';
 
 export function OwnerDashboard() {
   const navigation = useNavigation();
+  const route = useRoute<any>();
   const insets = useSafeAreaInsets();
   const { user, loading: authLoading, signOut } = useAuth();
   const { isOwner, isReviewer, isReviewerOnly, hasAdminAccess, loading: ownerLoading } = useOwnerAuth();
-  const { t, language } = useLanguage();
+  const { t, language, isRTL } = useLanguage();
   const colors = getOwnerColors();
   const typography = getTypographyStyles(language as 'ckb' | 'ar');
-  const styles = createStyles(colors, insets, typography);
+  const styles = createStyles(colors, insets, typography, isRTL);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('review');
   const [pendingCount, setPendingCount] = useState(0);
   const [apiStatus, setApiStatus] = useState<'loading' | 'connected' | 'not_configured' | 'error'>('loading');
   const [apiSummary, setApiSummary] = useState<string>('');
   const [showMenu, setShowMenu] = useState(false);
-  const SUPABASE_URL = 'https://uivgyexyakfincwgghgh.supabase.co';
-
+  const highlightCampaignId = (route.params as any)?.highlightCampaignId as string | undefined;
   const handleGoBack = () => {
     if (navigation.canGoBack()) {
       navigation.goBack();
@@ -68,12 +70,12 @@ export function OwnerDashboard() {
 
   const handleLogout = () => {
     Alert.alert(
-      t('logout') || 'Logout',
-      'Are you sure you want to log out?',
+      t('logout'),
+      t('confirmLogout'),
       [
-        { text: t('cancel') || 'Cancel', style: 'cancel' },
+        { text: t('cancel'), style: 'cancel' },
         {
-          text: t('logout') || 'Logout',
+          text: t('logout'),
           style: 'destructive',
           onPress: async () => {
             await signOut();
@@ -113,6 +115,14 @@ export function OwnerDashboard() {
     }
   }, [user, hasAdminAccess, isOwner]);
 
+  // When navigated from an owner notification with a specific campaign,
+  // force the Ad Review tab and let the queue auto-expand that campaign.
+  useEffect(() => {
+    if (highlightCampaignId) {
+      setActiveTab('review');
+    }
+  }, [highlightCampaignId]);
+
   const fetchPendingCount = async () => {
     if (!user) return;
 
@@ -137,24 +147,10 @@ export function OwnerDashboard() {
 
     try {
       setApiStatus('loading');
-      const { data: { session } } = await supabase.auth.getSession();
-
-      const response = await fetch(`${SUPABASE_URL}/functions/v1/tiktok-sync-status`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(session?.access_token
-            ? { 'Authorization': `Bearer ${session.access_token}` }
-            : {}),
-        },
-        body: JSON.stringify({ debugAdvertiserInfo: true }),
+      const { data, error } = await supabase.functions.invoke('tiktok-sync-status', {
+        body: { debugAdvertiserInfo: true },
       });
-
-      if (!response.ok) {
-        throw new Error('Failed to load TikTok status');
-      }
-
-      const data = await response.json();
+      if (error) throw error;
       const list = data?.advertiser_info?.data?.list || [];
       const advertiser = list[0];
 
@@ -182,25 +178,27 @@ export function OwnerDashboard() {
 
   // Owner-only tabs (hidden for reviewers). Order matches web: Main, TikTok, Content, Users, Finance, System
   const ownerTabs = [
-    { id: 'featured', label: 'Featured Ad', icon: Star },
-    { id: 'pricing', label: t('pricing') || 'Pricing', icon: DollarSign },
-    { id: 'discounts', label: t('discounts') || 'Discounts', icon: Tag },
+    { id: 'featured', label: t('featuredAd'), icon: Star },
+    { id: 'pricing', label: t('pricing'), icon: DollarSign },
+    { id: 'discounts', label: t('discounts'), icon: Tag },
+    { id: 'balance', label: language === 'ar' ? 'الرصيد' : 'باڵانس', icon: Wallet },
+    { id: 'transaction-logs', label: t('transactions') || 'مامەڵەکان', icon: DollarSign },
     { id: 'api', label: t('apiSettings'), icon: Settings },
     { id: 'accounts', label: t('adAccounts'), icon: Users },
-    { id: 'banner', label: t('banner') || 'Banner', icon: Image },
-    { id: 'promo', label: t('promoBanner') || 'Promo Banner', icon: Gift },
+    { id: 'banner', label: t('banner'), icon: Image },
+    { id: 'promo', label: t('promoBanner'), icon: Gift },
     { id: 'health', label: t('accountHealth'), icon: Activity },
     { id: 'logs', label: t('campaignLogs'), icon: FileText },
-    { id: 'broadcast', label: t('broadcast') || 'Broadcast', icon: Megaphone },
-    { id: 'app-control', label: 'App Control', icon: Sliders },
-    { id: 'buttons', label: 'Buttons', icon: LayoutGrid },
-    { id: 'tutorials', label: t('tutorials'), icon: HelpCircle },
-    { id: 'faqs', label: t('faq'), icon: HelpCircle },
-    { id: 'announcement', label: 'Popup Announce', icon: Megaphone },
+    { id: 'broadcast', label: t('broadcast'), icon: Megaphone },
+    { id: 'app-control', label: t('appControl'), icon: Sliders },
+    { id: 'buttons', label: t('buttons'), icon: LayoutGrid },
+    { id: 'tutorials', label: t('tutorialManagement'), icon: HelpCircle },
+    { id: 'faqs', label: t('faqManagement'), icon: HelpCircle },
+    { id: 'announcement', label: t('popupAnnounce'), icon: Megaphone },
     { id: 'users', label: t('userManagement'), icon: UserCog },
-    { id: 'permissions', label: t('userPermissions') || 'Permissions', icon: Shield },
+    { id: 'permissions', label: t('permissions'), icon: Shield },
     { id: 'admins', label: t('admins'), icon: ShieldCheck },
-    { id: 'reviewers', label: t('reviewers') || 'Reviewers', icon: UserCheck },
+    { id: 'reviewers', label: t('adminReviewers'), icon: UserCheck },
   ];
 
   // Combine tabs based on access level
@@ -231,32 +229,13 @@ export function OwnerDashboard() {
         style={styles.headerGradient}
       >
         <View style={styles.headerRow}>
-          <TouchableOpacity
-            onPress={handleGoBack}
-            style={{
-              width: 40,
-              height: 40,
-              borderRadius: 12,
-              borderWidth: 1.5,
-              borderColor: 'rgba(255,255,255,0.4)',
-              backgroundColor: 'transparent',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Ionicons
-              name="chevron-back"
-              size={20}
-              color={colors.primary.foreground}
-              style={{ transform: [{ scaleX: I18nManager.isRTL ? -1 : 1 }] }}
-            />
-          </TouchableOpacity>
+          <BackButton onPress={handleGoBack} color="#FFFFFF" style={styles.headerBackButton} />
           <View style={styles.headerCenter}>
-            <Text style={styles.adminTitle}>{t('admin') || 'Admin'}</Text>
-            <Text style={styles.adminSubtitle}>{t('adminSubtitle') || 'Review ads, manage accounts'}</Text>
+            <Text style={[styles.adminTitle, isRTL && styles.adminTitleRTL]}>{t('admin')}</Text>
+            <Text style={[styles.adminSubtitle, isRTL && styles.adminSubtitleRTL]}>{t('adminSubtitle')}</Text>
           </View>
           <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
-            <Text style={styles.logoutText}>{t('logout') || 'Logout'}</Text>
+            <Text style={styles.logoutText}>{t('logout')}</Text>
           </TouchableOpacity>
         </View>
       </LinearGradient>
@@ -332,7 +311,7 @@ export function OwnerDashboard() {
       <View style={styles.tabContent}>
         {activeTab === 'review' && (
           <View style={styles.reviewContainer}>
-            <AdReviewQueue />
+            <AdReviewQueue highlightCampaignId={highlightCampaignId} />
           </View>
         )}
 
@@ -346,6 +325,14 @@ export function OwnerDashboard() {
 
         {activeTab === 'discounts' && (
           <DiscountManagementScreen />
+        )}
+
+        {activeTab === 'balance' && (
+          <BalanceTab />
+        )}
+
+        {activeTab === 'transaction-logs' && (
+          <TransactionLogsTab />
         )}
 
         {activeTab === 'reviewers' && (
@@ -416,7 +403,7 @@ export function OwnerDashboard() {
   );
 }
 
-const createStyles = (colors: any, insets: any, typography: any) => StyleSheet.create({
+const createStyles = (colors: any, insets: any, typography: any, isRTL?: boolean) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background.DEFAULT,
@@ -436,6 +423,18 @@ const createStyles = (colors: any, insets: any, typography: any) => StyleSheet.c
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  headerBackButton: {
+    width: 40,
+    height: 40,
+    minWidth: 40,
+    minHeight: 40,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.5)',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   backButton: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -453,11 +452,19 @@ const createStyles = (colors: any, insets: any, typography: any) => StyleSheet.c
     fontSize: 22,
     color: colors.primary.foreground,
   },
+  adminTitleRTL: {
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
   adminSubtitle: {
     ...typography.caption,
     marginTop: 2,
     fontSize: 12,
     color: 'rgba(255,255,255,0.8)',
+  },
+  adminSubtitleRTL: {
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
   headerRight: {
     flexDirection: 'row',

@@ -19,6 +19,7 @@ interface AnnouncementData {
   button_text_ar: string;
   button_link: string | null;
   show_close: boolean;
+  created_at?: string;
 }
 
 export const FeatureAnnouncementPopup: React.FC = () => {
@@ -31,24 +32,25 @@ export const FeatureAnnouncementPopup: React.FC = () => {
 
   const fetchAnnouncement = useCallback(async () => {
     try {
-      const { data, error } = await supabase.functions.invoke('app-settings', {
-        body: { action: 'get', key: 'global' },
-      });
-      if (error) return;
-      const settings = data?.settings?.value || null;
-      const incoming = settings?.announcement as AnnouncementData | undefined;
+      const { data, error } = await supabase
+        .from('app_settings')
+        .select('value')
+        .eq('key', 'global')
+        .single();
+      if (error || !data?.value) return;
+      // value is ALREADY parsed JSON — do NOT JSON.parse() it
+      const value = data.value as { announcement?: AnnouncementData };
+      const incoming = value?.announcement;
       if (!incoming?.enabled) {
         setVisible(false);
         return;
       }
-
-      const currentId = JSON.stringify(incoming);
-      const dismissedId = await AsyncStorage.getItem('rekto_announcement_dismissed');
-      if (dismissedId === currentId) {
+      // Show only if announcement.enabled === true AND created_at > last seen
+      const lastSeen = await AsyncStorage.getItem('last_announcement_seen');
+      if (incoming.created_at && lastSeen && incoming.created_at <= lastSeen) {
         setVisible(false);
         return;
       }
-
       setAnnouncement(incoming);
       setVisible(true);
     } catch {
@@ -71,8 +73,8 @@ export const FeatureAnnouncementPopup: React.FC = () => {
   });
 
   const handleClose = async () => {
-    if (announcement) {
-      await AsyncStorage.setItem('rekto_announcement_dismissed', JSON.stringify(announcement));
+    if (announcement?.created_at) {
+      await AsyncStorage.setItem('last_announcement_seen', announcement.created_at);
     }
     setVisible(false);
   };

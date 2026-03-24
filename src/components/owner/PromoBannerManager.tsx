@@ -6,8 +6,9 @@ import { borderRadius, spacing } from '@/theme/spacing';
 import { getTypographyStyles } from '@/theme/typography';
 import { iconTransformRTL, inputStyleRTL } from '@/utils/rtl';
 import { toast } from '@/utils/toast';
+import { translateErrorMessage } from '@/utils/errorTranslator';
 import { Picker } from '@react-native-picker/picker';
-import { LinearGradient } from 'expo-linear-gradient';
+import LinearGradient from 'react-native-linear-gradient';
 import { ArrowRight, Gift, Save, Sparkles } from 'lucide-react-native';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Switch, TextInput, TouchableOpacity, View } from 'react-native';
@@ -24,7 +25,8 @@ interface PromoBannerSettings {
 
 export const PromoBannerManager: React.FC = () => {
   const colors = getOwnerColors();
-  const { language } = useLanguage();
+  const { language, t } = useLanguage();
+  const lang = (language || 'ckb') as 'ckb' | 'ar';
   const insets = useSafeAreaInsets();
   const typography = getTypographyStyles(language as 'ckb' | 'ar');
   const styles = createStyles(colors, insets, typography);
@@ -88,11 +90,45 @@ export const PromoBannerManager: React.FC = () => {
       });
 
       if (error) throw error;
-      
+      if (data?.success === false) {
+        const msg = translateErrorMessage(data?.error ?? '', lang);
+        Alert.alert(lang === 'ckb' ? 'هەڵە' : 'خطأ', msg);
+        return;
+      }
+
+      if (settings.enabled) {
+        try {
+          const { data: profilesData } = await supabase
+            .from('profiles')
+            .select('user_id');
+          const allProfiles = profilesData ?? [];
+          if (allProfiles.length > 0) {
+            const userIds = allProfiles.map((p: { user_id: string }) => p.user_id);
+            await supabase.functions.invoke('send-onesignal-push', {
+              body: {
+                user_ids: userIds,
+                title: settings.text_ckb || '✨ ئۆفەری تایبەت!',
+                body: settings.text_ar || 'عرض خاص متاح الآن!',
+                data: {
+                  type: 'promo',
+                  screen: 'CreateAd',
+                  target_budget: settings.target_budget,
+                  display_price_iqd: settings.display_price_iqd,
+                },
+                tag: 'promo-banner',
+              },
+            });
+          }
+        } catch (pushErr) {
+          console.error('Failed to send promo push:', pushErr);
+        }
+      }
+
       toast.success('Success', 'Operation completed');
-    } catch (err) {
+    } catch (err: any) {
       console.error('Save failed:', err);
-      Alert.alert('Error', 'Failed to save settings');
+      const msg = err?.data?.error ? translateErrorMessage(String(err.data.error), lang) : translateErrorMessage('', lang);
+      Alert.alert(lang === 'ckb' ? 'هەڵە' : 'خطأ', msg);
     } finally {
       setSaving(false);
     }
@@ -220,7 +256,7 @@ export const PromoBannerManager: React.FC = () => {
       </View>
 
       {/* Live Preview */}
-      <Text style={styles.sectionTitle}>Live Preview</Text>
+      <Text style={styles.sectionTitle}>{t('livePreview')}</Text>
       <View style={styles.previewCard}>
         <LinearGradient
           colors={['#7C3AED', '#A855F7', '#EC4899']}
@@ -228,7 +264,7 @@ export const PromoBannerManager: React.FC = () => {
           end={{ x: 1, y: 0 }}
           style={styles.previewBanner}
         >
-          <View style={[styles.previewContent, isRTL && styles.previewContentRTL]}>
+          <View style={styles.previewContent}>
             <View style={styles.previewLeft}>
               <View style={styles.previewIconContainer}>
                 <Sparkles size={20} color="#FFF" />
@@ -240,7 +276,7 @@ export const PromoBannerManager: React.FC = () => {
             ${settings.target_budget} = {(settings.display_price_iqd || 0).toLocaleString()} IQD
           </Text>
           <View style={styles.previewFooter}>
-            <Text style={styles.previewFooterText}>Tap to create your ad now</Text>
+            <Text style={styles.previewFooterText}>{t('tapToCreateYourAdNow')}</Text>
             <ArrowRight size={16} color="#FFF" style={iconTransformRTL()} />
           </View>
         </LinearGradient>

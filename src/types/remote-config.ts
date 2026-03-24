@@ -9,6 +9,7 @@ export interface AppSettings {
     analytics_enabled: boolean;
     profile_editing_enabled: boolean;
     featured_story_enabled?: boolean;
+    ios_payments_hidden: boolean;
   };
   objectives: {
     conversions_enabled: boolean;
@@ -57,6 +58,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     analytics_enabled: true,
     profile_editing_enabled: true,
     featured_story_enabled: true,
+    ios_payments_hidden: false,
   },
   objectives: {
     conversions_enabled: true,
@@ -81,6 +83,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     discount_notification_message: '',
   },
   pricing: {
+    /** Default only for type shape; actual rate from app_settings via usePricingConfig() */
     exchange_rate: 1450,
     ten_dollar_ads_enabled: true,
     tax_table: {

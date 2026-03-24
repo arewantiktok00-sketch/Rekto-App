@@ -4,6 +4,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { spacing, borderRadius } from '@/theme/spacing';
+import { ChevronBackIcon } from '@/components/icons/ChevronBackIcon';
 import { Text } from '@/components/common/Text';
 
 export function NotFound() {
@@ -20,7 +21,10 @@ export function NotFound() {
         style={styles.button}
         onPress={() => navigation.goBack()}
       >
-        <Text style={[styles.buttonText, isRTL && styles.textRTL]}>{t('back') || 'Go Back'}</Text>
+        <View style={styles.backRow}>
+          <ChevronBackIcon size={20} color={colors.primary.foreground} isRTL={isRTL} />
+          <Text style={[styles.buttonText, isRTL && styles.textRTL]}>{t('back') || 'Go Back'}</Text>
+        </View>
       </TouchableOpacity>
     </View>
   );
@@ -57,6 +61,11 @@ const createStyles = (colors: any, isRTL?: boolean) => StyleSheet.create({
     height: 56,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  backRow: {
+    flexDirection: (isRTL ?? false) ? 'row-reverse' : 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   buttonText: {
     color: colors.primary.foreground,

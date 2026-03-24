@@ -3,7 +3,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { spacing } from '@/theme/spacing';
 import { iconTransformRTL } from '@/utils/rtl';
-import { Image as ExpoImage } from 'expo-image';
+import { Image } from 'react-native';
 import { ChevronLeft, Link2, RefreshCw } from 'lucide-react-native';
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, StyleSheet, TouchableOpacity, View } from 'react-native';
@@ -24,33 +24,17 @@ interface LinkCardProps {
 const getCTALabel = (ctaValue?: string | null, language?: string): string | null => {
   if (!ctaValue) return null;
 
-  const ctaLabels: Record<string, { en: string; ckb: string; ar: string }> = {
-    CONTACT_US: {
-      en: 'Contact us',
-      ckb: 'پەیوەندیمان پێوە بکە',
-      ar: 'تواصل معنا',
-    },
-    SEND_MESSAGE: {
-      en: 'Send message',
-      ckb: 'پەیام بنێرە',
-      ar: 'أرسل رسالة',
-    },
-    LEARN_MORE: {
-      en: 'Learn more',
-      ckb: 'زیاتر بزانە',
-      ar: 'اعرف المزيد',
-    },
-    VISIT_WEBSITE: {
-      en: 'Visit website',
-      ckb: 'سەردانی وێبسایت بکە',
-      ar: 'زيارة الموقع',
-    },
+  const ctaLabels: Record<string, { ckb: string; ar: string }> = {
+    CONTACT_US: { ckb: 'پەیوەندیمان پێوە بکە', ar: 'تواصل معنا' },
+    SEND_MESSAGE: { ckb: 'پەیام بنێرە', ar: 'أرسل رسالة' },
+    LEARN_MORE: { ckb: 'زیاتر بزانە', ar: 'اعرف المزيد' },
+    VISIT_WEBSITE: { ckb: 'سەردانی وێبسایت بکە', ar: 'زيارة الموقع' },
   };
 
-  const lang = language === 'ckb' || language === 'ar' ? language : 'ckb';
+  const lang = language === 'ar' ? 'ar' : 'ckb';
   const labels = ctaLabels[ctaValue];
   if (!labels) return null;
-  return labels[lang] || labels.en;
+  return labels[lang];
 };
 
 export const LinkCard: React.FC<LinkCardProps> = ({
@@ -89,9 +73,9 @@ export const LinkCard: React.FC<LinkCardProps> = ({
     }
   }, [syncStatus, pulseAnim]);
 
-  const syncLabels = isRTL
-    ? { pending: 'چاوەڕوان', failed: 'سەرکەوتوو نەبوو', synced: 'کار دەکا' }
-    : { pending: 'Pending', failed: 'Failed', synced: 'Live' };
+  const syncLabels = language === 'ar'
+    ? { pending: 'قيد المعالجة', failed: 'فشل', synced: 'مُزامَن' }
+    : { pending: 'چاوەڕوان', failed: 'سەرکەوتوو نەبوو', synced: 'کار دەکا' };
   const syncMeta =
     syncStatus === 'pending'
       ? { label: syncLabels.pending, style: styles.syncPending, textStyle: styles.syncPendingText }
@@ -108,13 +92,13 @@ export const LinkCard: React.FC<LinkCardProps> = ({
       style={styles.card}
       activeOpacity={0.7}
     >
-      <View style={[styles.container, isRTL && styles.containerRTL]}>
+      <View style={styles.container}>
         {/* Avatar (if provided) - React Native requires source={{ uri }} and explicit dimensions */}
         {avatarUrl && typeof avatarUrl === 'string' && avatarUrl.startsWith('https://') && !imageFailed ? (
-          <ExpoImage
+          <Image
             source={{ uri: avatarUrl }}
             style={styles.avatar}
-            contentFit="cover"
+            resizeMode="cover"
             onError={() => setImageFailed(true)}
           />
         ) : avatarUrl && imageFailed ? (
@@ -212,9 +196,6 @@ const createStyles = (colors: any, isRTL?: boolean) => StyleSheet.create({
     width: '100%',
     maxWidth: '100%',
   },
-  containerRTL: {
-    flexDirection: 'row',
-  },
   avatar: {
     width: 48,
     height: 48,
@@ -240,7 +221,7 @@ const createStyles = (colors: any, isRTL?: boolean) => StyleSheet.create({
     minWidth: 0,
     maxWidth: '100%',
     justifyContent: 'center',
-    alignItems: (isRTL ? 'flex-end' : 'center') as 'center' | 'flex-end',
+    alignItems: 'center',
   },
   title: {
     fontSize: 16,
@@ -261,13 +242,13 @@ const createStyles = (colors: any, isRTL?: boolean) => StyleSheet.create({
     paddingVertical: 4,
     paddingHorizontal: 10,
     borderRadius: 12,
-    alignSelf: (isRTL ? 'flex-end' : 'flex-start') as 'flex-start' | 'flex-end',
+    alignSelf: 'flex-start',
   },
   syncBadge: {
     paddingVertical: 3,
     paddingHorizontal: 10,
     borderRadius: 10,
-    alignSelf: (isRTL ? 'flex-end' : 'flex-start') as 'flex-start' | 'flex-end',
+    alignSelf: 'flex-start',
     marginBottom: 6,
   },
   syncBadgeContent: {

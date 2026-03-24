@@ -1,4 +1,5 @@
-import { supabase, supabaseMirror } from '@/integrations/supabase/client';
+import { supabase } from '@/integrations/supabase/client';
+import { getTranslation, type LocaleKey } from '@/i18n/translations';
 import { clearCached } from '@/services/globalCache';
 import { toast } from '@/utils/toast';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -53,8 +54,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isBlocked, setIsBlocked] = useState(false);
   const [blockReason, setBlockReason] = useState<string | null>(null);
   const blockChannelRef = useRef<any>(null);
-  const SUPABASE_URL = 'https://uivgyexyakfincwgghgh.supabase.co';
-  
   // Alias for compatibility
   const isLoading = loading;
 
@@ -88,12 +87,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSession(null);
     setUser(null);
     
-    // Show alert (optional - BlockedScreen will handle UI)
-    Alert.alert(
-      'Account Suspended',
-      reason || 'Your account has been suspended. Please contact support.',
-      [{ text: 'OK' }]
-    );
+    // Show alert (localized — no English in UI)
+    const saved = await AsyncStorage.getItem('rekto-language');
+    const locale: LocaleKey = saved === 'ckb' ? 'ckb' : 'ar';
+    const title = getTranslation('accountSuspended', locale);
+    const message = reason || getTranslation('accountSuspendedMessage', locale);
+    Alert.alert(title, message, [{ text: 'OK' }]);
   }, []);
 
   // Check if user is blocked via edge function
@@ -104,20 +103,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       console.log('[Auth] Checking block status for:', checkId);
 
-      const response = await fetch(`${SUPABASE_URL}/functions/v1/check-user-block`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: checkId }),
+      const { data, error } = await supabase.functions.invoke('check-user-block', {
+        body: { user_id: checkId },
       });
 
-      if (!response.ok) {
+      if (error) {
         // Silently handle network/function errors - don't block user if check fails
         // This prevents false positives when edge function is unavailable
-        console.warn('[Auth] Block check failed (non-critical):', response.status);
+        console.warn('[Auth] Block check failed (non-critical):', error.message);
         return false; // Assume not blocked on error to avoid false positives
       }
-
-      const data = await response.json();
       console.log('[Auth] Block check result:', data);
 
       if (data?.isBlocked) {
@@ -153,7 +148,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const msg = String(sessionError.message ?? '');
           if (msg.includes('Refresh Token') || msg.includes('refresh_token') || msg.includes('Invalid') && msg.includes('Token')) {
             await supabase.auth.signOut();
-            if (supabaseMirror) await supabaseMirror.auth.signOut();
             setSession(null);
             setUser(null);
             setLoading(false);
@@ -166,13 +160,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setUser(currentSession.user);
           setSession(currentSession);
           setLoading(false); // Allow UI to render immediately
-          if (supabaseMirror) {
-            await supabaseMirror.auth.setSession({
-              access_token: currentSession.access_token,
-              refresh_token: currentSession.refresh_token,
-            });
-          }
-          
           // Background operations (non-blocking)
           checkBlockStatus(currentSession.user.id).then((blocked) => {
             if (blocked) {
@@ -187,7 +174,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
           
           blockChannelRef.current = supabase
-            .channel(`user_blocks_${currentSession.user.id}`)
+            .channel(`user_block_${currentSession.user.id}`)
             .on(
               'postgres_changes',
               {
@@ -213,7 +200,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (msg.includes('Refresh Token') || msg.includes('refresh_token') || msg.includes('Invalid') && msg.includes('Token')) {
           try {
             await supabase.auth.signOut();
-            if (supabaseMirror) await supabaseMirror.auth.signOut();
           } catch (_) {}
           setSession(null);
           setUser(null);
@@ -237,9 +223,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
           
           await clearAllAppState();
-          if (supabaseMirror) {
-            await supabaseMirror.auth.signOut();
-          }
           setSession(null);
           setUser(null);
           setIsBlocked(false);
@@ -249,13 +232,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setUser(newSession.user);
           setSession(newSession);
           setLoading(false);
-          if (supabaseMirror) {
-            await supabaseMirror.auth.setSession({
-              access_token: newSession.access_token,
-              refresh_token: newSession.refresh_token,
-            });
-          }
-          
           // Background block check (non-blocking)
           checkBlockStatus(newSession.user.id).then((blocked) => {
             if (blocked) {
@@ -270,7 +246,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
           
           blockChannelRef.current = supabase
-            .channel(`user_blocks_${newSession.user.id}`)
+            .channel(`user_block_${newSession.user.id}`)
             .on(
               'postgres_changes',
               {
@@ -328,16 +304,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [user, isBlocked, checkBlockStatus]);
 
   const signUp = async (email: string, password: string, fullName: string) => {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          full_name: fullName,
-        },
-      },
-    });
-    return { error };
+    try {
+      const { data, error } = await supabase.functions.invoke('auth-signup', {
+        body: { email, password, fullName },
+      });
+      if (error) return { error };
+      if (data?.session) {
+        await supabase.auth.setSession({
+          access_token: data.session.access_token,
+          refresh_token: data.session.refresh_token,
+        });
+      }
+      return { error: data?.error ? new Error(data.message || data.error) : null };
+    } catch (err: any) {
+      return { error: err instanceof Error ? err : new Error(String(err)) };
+    }
   };
 
   const checkBlockedStatus = async (): Promise<{ isBlocked: boolean; reason: string | null }> => {
@@ -346,20 +327,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     try {
       // Use dedicated check-user-block function (no JWT required)
-      const response = await fetch(`${SUPABASE_URL}/functions/v1/check-user-block`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: currentUser.id }),
+      const { data, error } = await supabase.functions.invoke('check-user-block', {
+        body: { user_id: currentUser.id },
       });
 
-      if (!response.ok) {
+      if (error) {
         // Silently handle errors - network issues shouldn't block the app
-        console.warn('[Auth] Block status check failed (non-critical):', response.status);
+        console.warn('[Auth] Block status check failed (non-critical):', error.message);
         // Return not blocked on error to avoid false positives
         return { isBlocked: false, reason: null };
       }
-
-      const data = await response.json();
 
       // API returned block status
       if (data?.isBlocked === true) {
@@ -389,17 +366,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signIn = async (email: string, password: string) => {
-    // Clear any existing state before signing in new user
-    await clearAllAppState();
-    
-    // Use edge function for login (includes block check)
-    try {
-      const { data, error: edgeError } = await supabase.functions.invoke('auth-login', {
-        body: { email, password },
-      });
+    // Clear app state in background so login is never blocked (e.g. removeChannel can hang)
+    clearAllAppState().catch((e) => {
+      console.warn('[Auth] clearAllAppState non-blocking error:', e);
+    });
 
-      // Check if account is blocked
-      if (data?.isBlocked || data?.message?.includes('suspended') || data?.message?.includes('blocked')) {
+    const LOGIN_TIMEOUT_MS = 25000;
+
+    const withTimeout = <T,>(promise: Promise<T>, ms: number): Promise<T> => {
+      return new Promise((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error('Network request timed out. Please try again.')), ms);
+        promise.then(
+          (v) => {
+            clearTimeout(t);
+            resolve(v);
+          },
+          (e) => {
+            clearTimeout(t);
+            reject(e);
+          }
+        );
+      });
+    };
+
+    const doSignIn = async (): Promise<{ error: Error | null; isBlocked?: boolean; blockReason?: string | null }> => {
+      try {
+        const { data, error: edgeError } = await supabase.functions.invoke('auth-login', {
+          body: { email, password },
+        });
+
+        if (data?.isBlocked || data?.message?.includes('suspended') || data?.message?.includes('blocked')) {
           setIsBlocked(true);
           setBlockReason(data.reason || null);
           await forceLogoutBlockedUser(data.reason || undefined);
@@ -410,79 +406,67 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           };
         }
 
-      if (edgeError) {
-        // If edge function fails, try direct Supabase auth as fallback
-        const { error: directError } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-        
-        if (directError) {
-          return { error: directError, isBlocked: false };
+        if (edgeError) {
+          const { error: directError } = await supabase.auth.signInWithPassword({ email, password });
+          if (directError) return { error: directError, isBlocked: false };
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+            setUser(session.user);
+            setSession(session);
+            setLoading(false);
+            checkBlockStatus(session.user.id).then(() => {});
+          }
+          return { error: null, isBlocked: false };
         }
 
-        // ⚡ Session is set immediately - block check happens in background
+        // Accept session from edge even if success flag is missing (legacy/different API shape)
+        if (!data?.success && !data?.session?.access_token) {
+          return { error: new Error(data?.message || data?.error || 'Login failed'), isBlocked: false };
+        }
+
+        let session = null;
+        if (data?.session?.access_token) {
+          const { data: sessionData } = await supabase.auth.setSession({
+            access_token: data.session.access_token,
+            refresh_token: data.session.refresh_token || '',
+          });
+          session = sessionData?.session ?? (await supabase.auth.getSession()).data?.session;
+        } else {
+          const { error: directError } = await supabase.auth.signInWithPassword({ email, password });
+          if (directError) return { error: directError, isBlocked: false };
+          session = (await supabase.auth.getSession()).data?.session;
+        }
+
+        if (session?.user) {
+          setUser(session.user);
+          setSession(session);
+          setLoading(false);
+          checkBlockStatus(session.user.id).then(() => {});
+        }
+        return { error: null, isBlocked: false };
+      } catch (err: any) {
+        console.error('[Auth] Login error:', err);
+        const { error: directError } = await supabase.auth.signInWithPassword({ email, password });
+        if (directError) return { error: directError, isBlocked: false };
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
-          // Background block check (non-blocking)
-          checkBlockStatus(session.user.id).then((blocked) => {
-            if (blocked) {
-              // forceLogoutBlockedUser already called
-            }
-          });
+          setUser(session.user);
+          setSession(session);
+          setLoading(false);
+          checkBlockStatus(session.user.id).then(() => {});
         }
-        
         return { error: null, isBlocked: false };
       }
+    };
 
-      if (!data?.success) {
-        return { error: new Error(data?.message || data?.error || 'Login failed'), isBlocked: false };
-      }
-
-      // If edge function succeeds, set session
-      if (data?.session) {
-        await supabase.auth.setSession({
-          access_token: data.session.access_token,
-          refresh_token: data.session.refresh_token,
-        });
-      }
-
-      // ⚡ Session is set immediately - block check happens in background
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        // Background block check (non-blocking)
-        checkBlockStatus(session.user.id).then((blocked) => {
-          if (blocked) {
-            // forceLogoutBlockedUser already called
-          }
-        });
-      }
-
-      return { error: null, isBlocked: false };
+    try {
+      return await withTimeout(doSignIn(), LOGIN_TIMEOUT_MS);
     } catch (err: any) {
-      console.error('[Auth] Login error:', err);
-      // Fallback to direct Supabase auth
-      const { error: directError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-      
-      if (directError) {
-        return { error: directError, isBlocked: false };
-      }
-
-      // ⚡ Session is set immediately - block check happens in background
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        // Background block check (non-blocking)
-        checkBlockStatus(session.user.id).then((blocked) => {
-          if (blocked) {
-            // forceLogoutBlockedUser already called
-          }
-        });
-      }
-
-      return { error: null, isBlocked: false };
+      console.error('[Auth] Login timeout or error:', err);
+      return {
+        error: err instanceof Error ? err : new Error(err?.message || 'Login failed'),
+        isBlocked: false,
+      };
     }
   };
 
@@ -490,14 +474,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     console.log('[Auth] User is blocked, forcing sign out');
     setIsBlocked(true);
 
-    // Show alert (will be handled by BlockedScreen, but show here too for immediate feedback)
     try {
       const { Alert } = await import('react-native');
-      Alert.alert(
-        'Account Suspended',
-        reason || 'Your account has been suspended. Please contact support.',
-        [{ text: 'OK' }]
-      );
+      const saved = await AsyncStorage.getItem('rekto-language');
+      const locale: LocaleKey = saved === 'ckb' ? 'ckb' : 'ar';
+      const title = getTranslation('accountSuspended', locale);
+      const message = reason || getTranslation('accountSuspendedMessage', locale);
+      Alert.alert(title, message, [{ text: 'OK' }]);
     } catch (e) {
       // Alert not available, continue with sign out
     }

@@ -1,12 +1,12 @@
-import React, { useMemo } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useTheme } from '@/contexts/ThemeContext';
 import { ScreenHeader } from '@/components/common/ScreenHeader';
-import { spacing, borderRadius } from '@/theme/spacing';
-import { useLanguage } from '@/contexts/LanguageContext';
 import { Text } from '@/components/common/Text';
+import { useLanguage } from '@/contexts/LanguageContext';
+import { useTheme } from '@/contexts/ThemeContext';
+import { borderRadius, spacing } from '@/theme/spacing';
+import { useNavigation } from '@react-navigation/native';
+import { useMemo } from 'react';
+import { ScrollView, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export function Refund() {
   const navigation = useNavigation();
@@ -260,9 +260,6 @@ const createStyles = (colors: any, isRTL?: boolean) => StyleSheet.create({
   headerRTL: {
     flexDirection: 'row',
   },
-  rowReverse: {
-    flexDirection: 'row',
-  },
   textRTL: {
     textAlign: 'right',
     writingDirection: 'rtl',
@@ -290,7 +287,8 @@ const createStyles = (colors: any, isRTL?: boolean) => StyleSheet.create({
     fontWeight: '700',
     color: colors.foreground.DEFAULT,
     flex: 1,
-    textAlign: 'center',
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
   content: {
     flex: 1,
@@ -312,6 +310,7 @@ const createStyles = (colors: any, isRTL?: boolean) => StyleSheet.create({
     fontWeight: '700',
     color: colors.foreground.DEFAULT,
     marginBottom: spacing.sm,
+    alignSelf: 'stretch',
   },
   heroText: {
     fontSize: 14,

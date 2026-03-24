@@ -2,7 +2,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { borderRadius, spacing } from '@/theme/spacing';
 import { toast } from '@/utils/toast';
 import { Picker } from '@react-native-picker/picker';
-import { LinearGradient } from 'expo-linear-gradient';
+import LinearGradient from 'react-native-linear-gradient';
 import { Mail, Save, Shield } from 'lucide-react-native';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -50,7 +50,7 @@ export const UserPermissionsTab: React.FC<UserPermissionsTabProps> = ({ colors, 
       });
 
       if (error || data?.error) {
-        toast.error('Error', 'Could not load users. Please try again.');
+        toast.error(t('error'), t('somethingWentWrong'));
         return;
       }
 
@@ -67,7 +67,7 @@ export const UserPermissionsTab: React.FC<UserPermissionsTabProps> = ({ colors, 
       setUsers(list);
       setOriginalUsers(list);
     } catch {
-      toast.error('Error', 'Could not load users. Please try again.');
+      toast.error(t('error'), t('somethingWentWrong'));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -163,16 +163,16 @@ export const UserPermissionsTab: React.FC<UserPermissionsTabProps> = ({ colors, 
         const result = await savePermissionsForUser(u);
         if (!result.ok) {
           const who = u.full_name || u.email || u.user_id;
-          toast.error('Error', result.message ? `${result.message} (${who})` : `Failed to save for ${who}. Please try again.`);
+          toast.error(t('error'), t('somethingWentWrong'));
           setSaving(false);
           return;
         }
       }
-      toast.success('Saved', 'All permission changes saved.');
+      toast.success(t('saved'), t('operationCompleted'));
       setOriginalUsers(users);
     } catch (err: any) {
       if (__DEV__) console.error('Save error:', err);
-      toast.error('Error', err?.message || 'Could not save. Please try again.');
+      toast.error(t('error'), t('somethingWentWrong'));
     } finally {
       setSaving(false);
     }

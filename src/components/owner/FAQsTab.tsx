@@ -7,10 +7,10 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   TextInput,
-  Modal,
   Alert,
   Switch,
 } from 'react-native';
+import { CenterModal } from '@/components/common/CenterModal';
 import { HelpCircle, Plus, Edit2, Trash2, X } from 'lucide-react-native';
 import { supabase } from '@/integrations/supabase/client';
 import { spacing, borderRadius } from '@/theme/spacing';
@@ -66,7 +66,7 @@ export const FAQsTab: React.FC<FAQsTabProps> = ({ colors, t }) => {
       setFaqs(data?.faqs || []);
     } catch (err: any) {
       console.error('Failed to fetch FAQs:', err);
-      toast.error('Error', 'Something went wrong');
+      toast.error(t('error'), t('somethingWentWrong'));
       setFaqs([]);
     } finally {
       setLoading(false);
@@ -125,13 +125,13 @@ export const FAQsTab: React.FC<FAQsTabProps> = ({ colors, t }) => {
               if (error) throw error;
 
               if (data?.success !== false) {
-                toast.success('Success', 'Operation completed');
+                toast.success(t('success'), t('operationCompleted'));
                 fetchFAQs();
               } else {
                 throw new Error(data?.error || 'Failed to delete FAQ');
               }
             } catch (err: any) {
-              toast.error('Error', 'Something went wrong');
+              toast.error(t('error'), t('somethingWentWrong'));
             }
           },
         },
@@ -141,7 +141,7 @@ export const FAQsTab: React.FC<FAQsTabProps> = ({ colors, t }) => {
 
   const handleSave = async () => {
     if (!formData.question_en.trim() || !formData.answer_en.trim()) {
-      toast.error('Error', 'Something went wrong');
+      toast.error(t('error'), t('somethingWentWrong'));
       return;
     }
 
@@ -171,7 +171,7 @@ export const FAQsTab: React.FC<FAQsTabProps> = ({ colors, t }) => {
 
         if (error) throw error;
 
-        toast.success('Success', 'Operation completed');
+        toast.success(t('success'), t('operationCompleted'));
       } else {
         const { data, error } = await supabase.functions.invoke('owner-content', {
           body: {
@@ -183,12 +183,12 @@ export const FAQsTab: React.FC<FAQsTabProps> = ({ colors, t }) => {
 
         if (error) throw error;
 
-        toast.success('Success', 'Operation completed');
+        toast.success(t('success'), t('operationCompleted'));
       }
       setShowModal(false);
       fetchFAQs();
     } catch (err: any) {
-      toast.error('Error', 'Something went wrong');
+      toast.error(t('error'), t('somethingWentWrong'));
     }
   };
 
@@ -260,10 +260,13 @@ export const FAQsTab: React.FC<FAQsTabProps> = ({ colors, t }) => {
         )}
       </ScrollView>
 
-      {/* Add/Edit Modal */}
-      <Modal visible={showModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+      {/* Add/Edit Modal — centered, keyboard-aware */}
+      <CenterModal
+        visible={showModal}
+        onRequestClose={() => setShowModal(false)}
+        keyboardAware
+      >
+        <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
                 {editingFaq ? 'Edit FAQ' : 'Add FAQ'}
@@ -371,9 +374,8 @@ export const FAQsTab: React.FC<FAQsTabProps> = ({ colors, t }) => {
                 <Text style={styles.saveButtonText}>Save</Text>
               </TouchableOpacity>
             </View>
-          </View>
         </View>
-      </Modal>
+      </CenterModal>
     </View>
   );
 };
@@ -494,16 +496,11 @@ const createStyles = (colors: any) =>
     actionButton: {
       padding: spacing.xs,
     },
-    modalOverlay: {
-      flex: 1,
-      backgroundColor: colors.overlay.dark,
-      justifyContent: 'flex-end',
-    },
     modalContent: {
       backgroundColor: colors.card.background,
-      borderTopLeftRadius: borderRadius.card,
-      borderTopRightRadius: borderRadius.card,
+      borderRadius: borderRadius.card,
       maxHeight: '90%',
+      width: '100%',
     },
     modalHeader: {
       flexDirection: 'row',

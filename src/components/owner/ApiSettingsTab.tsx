@@ -5,7 +5,8 @@ import { inputStyleRTL } from '@/utils/rtl';
 import { toast } from '@/utils/toast';
 import { Eye, EyeOff, Key, Plus, RefreshCw, Settings, Trash2, X } from 'lucide-react-native';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import { CenterModal } from '@/components/common/CenterModal';
 
 interface ApiSettingsTabProps {
   colors: any;
@@ -43,7 +44,7 @@ export const ApiSettingsTab: React.FC<ApiSettingsTabProps> = ({ colors, t }) => 
     } catch (err: any) {
       console.error('Failed to fetch API configs:', err);
       const errorMessage = err?.message || err?.error || t('failedToLoadApiConfigs') || 'Failed to load API configurations';
-      toast.error('Error', errorMessage);
+      toast.error(t('error'), t('somethingWentWrong'));
     } finally {
       setLoading(false);
     }
@@ -68,7 +69,7 @@ export const ApiSettingsTab: React.FC<ApiSettingsTabProps> = ({ colors, t }) => 
               toast.success('Token refreshed', 'API token updated');
               fetchApiConfigs();
             } catch (err) {
-              toast.error('Error', 'Failed to refresh token');
+              toast.error(t('error'), t('somethingWentWrong'));
             }
           },
         },
@@ -95,7 +96,7 @@ export const ApiSettingsTab: React.FC<ApiSettingsTabProps> = ({ colors, t }) => 
               fetchApiConfigs();
             } catch (err: any) {
               console.error('Delete config error:', err);
-              toast.error('Error', 'Failed to delete configuration');
+              toast.error(t('error'), t('somethingWentWrong'));
             }
           },
         },
@@ -105,12 +106,12 @@ export const ApiSettingsTab: React.FC<ApiSettingsTabProps> = ({ colors, t }) => 
 
   const handleAddConfig = async () => {
     if (!formData.access_token.trim()) {
-      toast.warning('Required', 'Please enter an access token');
+      toast.warning(t('required'), t('somethingWentWrong'));
       return;
     }
 
     if (!formData.business_center_id.trim() && !formData.advertiser_id.trim()) {
-      toast.warning('Required', 'Please enter a Business Center ID or Advertiser ID');
+      toast.warning(t('required'), t('somethingWentWrong'));
       return;
     }
 
@@ -170,7 +171,7 @@ export const ApiSettingsTab: React.FC<ApiSettingsTabProps> = ({ colors, t }) => 
       }
     } catch (err: any) {
       console.error('Add config error:', err);
-      toast.error('Error', 'Something went wrong');
+      toast.error(t('error'), t('somethingWentWrong'));
     } finally {
       setAddingConfig(false);
     }
@@ -248,15 +249,9 @@ export const ApiSettingsTab: React.FC<ApiSettingsTabProps> = ({ colors, t }) => 
         </View>
       )}
 
-      {/* Add API Configuration Modal */}
-      <Modal
-        visible={showAddModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowAddModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+      {/* Add API Configuration Modal — centered, keyboard-aware */}
+      <CenterModal visible={showAddModal} onRequestClose={() => setShowAddModal(false)} keyboardAware>
+        <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{t('addApiConfiguration') || 'Add API Configuration'}</Text>
               <TouchableOpacity onPress={() => setShowAddModal(false)}>
@@ -358,9 +353,8 @@ export const ApiSettingsTab: React.FC<ApiSettingsTabProps> = ({ colors, t }) => 
                 </TouchableOpacity>
               </View>
             </ScrollView>
-          </View>
         </View>
-      </Modal>
+      </CenterModal>
     </ScrollView>
   );
 };

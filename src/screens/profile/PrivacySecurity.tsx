@@ -1,20 +1,19 @@
-import React, { useState, useRef } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ScreenHeader } from '@/components/common/ScreenHeader';
+import { Text } from '@/components/common/Text';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { supabase, supabaseRead } from '@/integrations/supabase/client';
-import { Shield, LogOut, Trash2, Lock, X, AlertTriangle, Eye, EyeOff } from 'lucide-react-native';
 import { useTheme } from '@/contexts/ThemeContext';
-import { spacing, borderRadius } from '@/theme/spacing';
-import { getTypographyStyles, getFontFamily } from '@/theme/typography';
-import { toast } from '@/utils/toast';
-import { Text } from '@/components/common/Text';
-import { ScreenHeader } from '@/components/common/ScreenHeader';
+import { supabase, supabaseRead } from '@/integrations/supabase/client';
+import { borderRadius, spacing } from '@/theme/spacing';
+import { getFontFamily, getTypographyStyles } from '@/theme/typography';
+import { isRTL, rtlRow, rtlText } from '@/utils/rtl';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useNavigation } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
-import { isRTL, rtlText, rtlRow } from '@/utils/rtl';
+import { Lock, LogOut, Shield, Trash2 } from 'lucide-react-native';
+import { useState } from 'react';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export function PrivacySecurity() {
   const navigation = useNavigation();
@@ -115,25 +114,8 @@ export function PrivacySecurity() {
   const handleDeleteAccountApi = async () => {
     setDeleteLoading(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
-      if (!token) {
-        Alert.alert('Error', 'Session expired. Please sign in again.');
-        return;
-      }
-
-      const response = await fetch(
-        `${supabase.supabaseUrl}/functions/v1/delete-account`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-        }
-      );
-
-      const data = await response.json();
+      const { data, error } = await supabase.functions.invoke('delete-account');
+      if (error) throw error;
 
       if (data.success) {
         await supabase.auth.signOut();
@@ -170,11 +152,11 @@ export function PrivacySecurity() {
         {/* PASSWORD SECTION */}
         <Text style={[styles.sectionLabel, rtlText(rtl)]}>{t('password') || 'PASSWORD'}</Text>
         <TouchableOpacity
-          style={[styles.card, rtl && styles.cardRTL]}
+          style={styles.card}
           activeOpacity={0.85}
           onPress={handleChangePassword}
         >
-          <View style={[styles.cardIcon, styles.cardIconPurple, rtl && styles.cardIconRTL]}>
+          <View style={[styles.cardIcon, styles.cardIconPurple]}>
             <Lock size={18} color="#7C3AED" />
           </View>
           <View style={styles.cardContent}>
@@ -189,11 +171,11 @@ export function PrivacySecurity() {
         {/* SESSIONS SECTION */}
         <Text style={[styles.sectionLabel, rtlText(rtl)]}>{t('sessions') || 'SESSIONS'}</Text>
           <TouchableOpacity
-          style={[styles.card, rtl && styles.cardRTL]}
+          style={styles.card}
           activeOpacity={0.85}
             onPress={handleLogoutAll}
           >
-          <View style={[styles.cardIcon, styles.cardIconIndigo, rtl && styles.cardIconRTL]}>
+          <View style={[styles.cardIcon, styles.cardIconIndigo]}>
             <LogOut size={18} color="#4F46E5" />
           </View>
           <View style={styles.cardContent}>
@@ -206,8 +188,8 @@ export function PrivacySecurity() {
           </View>
           </TouchableOpacity>
 
-        <TouchableOpacity style={[styles.card, rtl && styles.cardRTL]} activeOpacity={0.85}>
-          <View style={[styles.cardIcon, styles.cardIconGreen, rtl && styles.cardIconRTL]}>
+        <TouchableOpacity style={styles.card} activeOpacity={0.85}>
+          <View style={[styles.cardIcon, styles.cardIconGreen]}>
             <Shield size={18} color="#16A34A" />
           </View>
           <View style={styles.cardContent}>
@@ -237,7 +219,7 @@ export function PrivacySecurity() {
             <>
               <Trash2 size={18} color={colors.primary.foreground} />
               <Text style={[styles.deleteAccountText, rtlText(rtl)]}>
-                {t('deleteAccount') || 'Delete Account'}
+                {t('deleteAccount')}
               </Text>
             </>
           )}
@@ -265,9 +247,6 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     backgroundColor: colors.background.DEFAULT,
   },
   headerRTL: {
-    flexDirection: 'row',
-  },
-  rowReverse: {
     flexDirection: 'row',
   },
   textRTL: {

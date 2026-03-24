@@ -1,16 +1,16 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, Modal } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useLanguage } from '@/contexts/LanguageContext';
-import { isRTL, rtlText, rtlRow } from '@/utils/rtl';
-import { Plus, CreditCard, AlertTriangle } from 'lucide-react-native';
-import { useTheme } from '@/contexts/ThemeContext';
-import { LinearGradient } from 'expo-linear-gradient';
-import { spacing, borderRadius } from '@/theme/spacing';
-import { toast } from '@/utils/toast';
-import { Text } from '@/components/common/Text';
 import { ScreenHeader } from '@/components/common/ScreenHeader';
+import { Text } from '@/components/common/Text';
+import { useLanguage } from '@/contexts/LanguageContext';
+import { useTheme } from '@/contexts/ThemeContext';
+import { borderRadius, spacing } from '@/theme/spacing';
+import { isRTL, rtlRow, rtlText } from '@/utils/rtl';
+import { toast } from '@/utils/toast';
+import { useNavigation } from '@react-navigation/native';
+import { AlertTriangle, CreditCard, Plus } from 'lucide-react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Modal, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export function PaymentMethods() {
   const navigation = useNavigation();
@@ -29,7 +29,7 @@ export function PaymentMethods() {
   }, [t]);
 
   const handleAddCard = () => {
-    toast.info(t('comingSoon') || 'Coming soon', t('paymentMethodsComingSoon') || 'Payment methods are not supported yet.');
+    toast.info(t('comingSoon'), t('paymentMethodsComingSoon'));
   };
 
   return (
@@ -49,7 +49,7 @@ export function PaymentMethods() {
               <View style={styles.comingSoonIconWrap}>
                 <AlertTriangle size={26} color="#FFFFFF" />
               </View>
-              <Text style={[styles.comingSoonTitle, rtlText(rtl)]}>{t('comingSoon') || 'Coming Soon'}</Text>
+              <Text style={[styles.comingSoonTitle, rtlText(rtl)]}>{t('comingSoon')}</Text>
             </View>
             <View style={styles.comingSoonBody}>
               <Text style={[styles.comingSoonText, rtlText(rtl)]}>
@@ -114,10 +114,10 @@ export function PaymentMethods() {
           </View>
           <View style={styles.moreOptionContent}>
             <Text style={[styles.moreOptionTitle, rtlText(rtl)]}>
-              {t('digitalWallets') || 'Digital Wallets'}
+              {t('digitalWallets')}
             </Text>
             <Text style={[styles.moreOptionSubtitle, rtlText(rtl)]}>
-              {t('comingSoon') || 'Coming soon'}
+              {t('comingSoon')}
             </Text>
           </View>
         </View>
@@ -131,9 +131,6 @@ const createStyles = (colors: any, insets: any, rtl?: boolean) => StyleSheet.cre
   container: {
     flex: 1,
     backgroundColor: colors.background.DEFAULT,
-  },
-  rowReverse: {
-    flexDirection: 'row',
   },
   textRTL: {
     textAlign: 'right',

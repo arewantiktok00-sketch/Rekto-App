@@ -1,17 +1,18 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
-import { 
-  Clock, 
-  CreditCard, 
-  FileCheck, 
-  Pause, 
-  CheckCircle, 
-  AlertCircle, 
-  XCircle 
+import {
+  Clock,
+  CreditCard,
+  FileCheck,
+  CheckCircle,
+  AlertCircle,
+  XCircle,
 } from 'lucide-react-native';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useLanguage } from '@/contexts/LanguageContext';
 import { spacing, borderRadius } from '@/theme/spacing';
 import { Text } from '@/components/common/Text';
+import { translateCampaignStatus } from '@/utils/transactionCampaignTranslator';
 
 export type CampaignStatus =
   | 'pending'
@@ -25,7 +26,8 @@ export type CampaignStatus =
   | 'paused'
   | 'completed'
   | 'rejected'
-  | 'failed';
+  | 'failed'
+  | 'deleted_external';
 
 interface CampaignStatusBadgeProps {
   status: string;
@@ -34,88 +36,92 @@ interface CampaignStatusBadgeProps {
   compact?: boolean;
 }
 
-// Status configuration - EXACTLY matching web version
-const statusConfig: Record<string, { 
-  icon: React.ComponentType<{ size?: number; color?: string }>; 
-  color: string; 
-  bgColor: string; 
-  label: string;
+// Status configuration - icons/colors only; label comes from translateCampaignStatus
+const statusConfig: Record<string, {
+  icon: React.ComponentType<{ size?: number; color?: string }>;
+  color: string;
+  bgColor: string;
 }> = {
-  waiting_for_admin: { 
-    icon: Clock, 
-    color: '#CA8A04',      // Yellow-600
-    bgColor: 'rgba(234, 179, 8, 0.15)', 
-    label: 'Under Review'  // NOT "Pending"!
+  waiting_for_admin: {
+    icon: Clock,
+    color: '#CA8A04',
+    bgColor: 'rgba(234, 179, 8, 0.15)',
   },
-  awaiting_payment: { 
-    icon: CreditCard, 
-    color: '#EA580C',      // Orange-600
-    bgColor: 'rgba(249, 115, 22, 0.15)', 
-    label: 'Awaiting Payment'
+  awaiting_payment: {
+    icon: CreditCard,
+    color: '#EA580C',
+    bgColor: 'rgba(249, 115, 22, 0.15)',
   },
-  verifying_payment: { 
-    icon: FileCheck, 
-    color: '#2563EB',      // Blue-600
-    bgColor: 'rgba(59, 130, 246, 0.15)', 
-    label: 'Verifying Payment'
+  verifying_payment: {
+    icon: FileCheck,
+    color: '#2563EB',
+    bgColor: 'rgba(59, 130, 246, 0.15)',
   },
-  pending: { 
-    icon: Clock, 
-    color: '#CA8A04',      // Yellow-600
-    bgColor: 'rgba(234, 179, 8, 0.15)', 
-    label: 'In Review'     // This means TikTok is reviewing
+  pending: {
+    icon: Clock,
+    color: '#CA8A04',
+    bgColor: 'rgba(234, 179, 8, 0.15)',
   },
-  active: { 
-    icon: CheckCircle, 
-    color: '#16A34A',      // Green-600
-    bgColor: 'rgba(22, 163, 74, 0.15)', 
-    label: 'Active'
+  in_review: {
+    icon: Clock,
+    color: '#CA8A04',
+    bgColor: 'rgba(234, 179, 8, 0.15)',
   },
-  paused: { 
-    icon: Pause, 
-    color: '#71717A',      // Gray-500
-    bgColor: 'rgba(113, 113, 122, 0.15)', 
-    label: 'Paused'
+  scheduled: {
+    icon: Clock,
+    color: '#CA8A04',
+    bgColor: 'rgba(234, 179, 8, 0.15)',
   },
-  completed: { 
-    icon: CheckCircle, 
-    color: '#2563EB',      // Blue-600
-    bgColor: 'rgba(59, 130, 246, 0.15)', 
-    label: 'Completed'
+  active: {
+    icon: CheckCircle,
+    color: '#16A34A',
+    bgColor: 'rgba(22, 163, 74, 0.15)',
   },
-  failed: { 
-    icon: AlertCircle, 
-    color: '#DC2626',      // Red-600
-    bgColor: 'rgba(220, 38, 38, 0.15)', 
-    label: 'Failed'
+  running: {
+    icon: CheckCircle,
+    color: '#16A34A',
+    bgColor: 'rgba(22, 163, 74, 0.15)',
   },
-  rejected: { 
-    icon: XCircle, 
-    color: '#DC2626',      // Red-600
-    bgColor: 'rgba(220, 38, 38, 0.15)', 
-    label: 'Rejected'
+  paused: {
+    icon: CheckCircle,
+    color: '#2563EB',
+    bgColor: 'rgba(59, 130, 246, 0.15)',
+  },
+  completed: {
+    icon: CheckCircle,
+    color: '#2563EB',
+    bgColor: 'rgba(59, 130, 246, 0.15)',
+  },
+  failed: {
+    icon: AlertCircle,
+    color: '#DC2626',
+    bgColor: 'rgba(220, 38, 38, 0.15)',
+  },
+  rejected: {
+    icon: XCircle,
+    color: '#DC2626',
+    bgColor: 'rgba(220, 38, 38, 0.15)',
+  },
+  deleted_external: {
+    icon: XCircle,
+    color: '#6B7280',
+    bgColor: 'rgba(107, 114, 128, 0.12)',
   },
 };
 
 export const CampaignStatusBadge: React.FC<CampaignStatusBadgeProps> = ({
   status,
-  rejectionReason,
-  tiktokStatus,
   compact = false,
 }) => {
   const { colors } = useTheme();
+  const { language } = useLanguage();
   const styles = createStyles(colors);
 
-  // Priority: TikTok rejection > internal status
-  let config = statusConfig[status] || statusConfig.pending;
-  
-  // Override for TikTok-specific statuses
-  if (tiktokStatus === 'AUDIT_DENIED') {
-    config = statusConfig.rejected;
-  } else if (tiktokStatus === 'AUDITING' && status === 'pending') {
-    config = statusConfig.pending; // "In Review" - TikTok is reviewing
-  }
+  const normalizedStatus = (status || '').toLowerCase();
+  const displayStatus = normalizedStatus === 'paused' ? 'completed' : normalizedStatus;
+  const config = statusConfig[displayStatus] || statusConfig.pending;
 
+  const label = translateCampaignStatus(displayStatus, language as 'ckb' | 'ar');
   const Icon = config.icon;
   const iconSize = compact ? 12 : 14;
 
@@ -123,7 +129,7 @@ export const CampaignStatusBadge: React.FC<CampaignStatusBadgeProps> = ({
     <View style={[styles.badge, { backgroundColor: config.bgColor }, compact && styles.compact]}>
       <Icon size={iconSize} color={config.color} />
       <Text style={[styles.badgeText, { color: config.color }, compact && styles.compactText]}>
-        {config.label}
+        {label}
       </Text>
     </View>
   );

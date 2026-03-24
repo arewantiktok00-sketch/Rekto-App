@@ -1,30 +1,27 @@
 import { ScreenHeader } from '@/components/common/ScreenHeader';
 import { Text } from '@/components/common/Text';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useRemoteConfig } from '@/contexts/RemoteConfigContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { borderRadius, spacing } from '@/theme/spacing';
 import { getTypographyStyles } from '@/theme/typography';
-import { toast } from '@/utils/toast';
+import { isRTL, rtlRow, rtlText } from '@/utils/rtl';
 import { useNavigation } from '@react-navigation/native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Globe, HelpCircle, Mail, MapPin, MessageCircle } from 'lucide-react-native';
 import { useState } from 'react';
-import { Linking, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
-import { isRTL, rtlText, rtlRow, rtlInput } from '@/utils/rtl';
+import { Linking, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export function HelpSupport() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { t, language } = useLanguage();
+  const { isPaymentsHidden } = useRemoteConfig();
   const rtl = isRTL(language);
   const { colors } = useTheme();
   const typography = getTypographyStyles(language as 'ckb' | 'ar');
   const styles = createStyles(colors, insets, typography, rtl);
 
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [message, setMessage] = useState('');
   const [expandedFaqIndex, setExpandedFaqIndex] = useState<number | null>(null);
 
   const handleWhatsApp = () => {
@@ -37,17 +34,6 @@ export function HelpSupport() {
 
   const handleEmail = () => {
     Linking.openURL('mailto:contact@rekto.net');
-  };
-
-  const handleSendFeedback = () => {
-    if (!message.trim()) {
-      toast.warning('Required', 'Please enter your message');
-      return;
-    }
-
-    toast.success('Sent', 'Thanks for your feedback');
-
-    setMessage('');
   };
 
   const faqs = [
@@ -82,18 +68,20 @@ export function HelpSupport() {
         {/* CONTACT US */}
         <Text style={[styles.sectionLabel, rtlText(rtl)]}>{t('contactUs') || 'CONTACT US'}</Text>
 
-        <TouchableOpacity style={[styles.contactCard, rtlRow(rtl)]} onPress={handleWhatsApp} activeOpacity={0.85}>
-          <View style={[styles.contactIcon, styles.whatsappIcon, rtl && styles.contactIconRTL]}>
-            <MessageCircle size={20} color="#16A34A" />
-          </View>
-          <View style={styles.contactContent}>
-            <Text style={[styles.contactTitle, rtlText(rtl)]}>{t('whatsapp') || 'WhatsApp'}</Text>
-            <Text style={[styles.contactSubtitle, rtlText(rtl)]}>+964 750 488 1516</Text>
-          </View>
-        </TouchableOpacity>
+        {!isPaymentsHidden && (
+          <TouchableOpacity style={[styles.contactCard, rtlRow(rtl)]} onPress={handleWhatsApp} activeOpacity={0.85}>
+            <View style={[styles.contactIcon, styles.whatsappIcon]}>
+              <MessageCircle size={20} color="#16A34A" />
+            </View>
+            <View style={styles.contactContent}>
+              <Text style={[styles.contactTitle, rtlText(rtl)]}>{t('whatsapp') || 'WhatsApp'}</Text>
+              <Text style={[styles.contactSubtitle, rtlText(rtl)]}>+964 750 488 1516</Text>
+            </View>
+          </TouchableOpacity>
+        )}
 
         <TouchableOpacity style={[styles.contactCard, rtlRow(rtl)]} onPress={handleEmail} activeOpacity={0.85}>
-          <View style={[styles.contactIcon, styles.emailIcon, rtl && styles.contactIconRTL]}>
+          <View style={[styles.contactIcon, styles.emailIcon]}>
             <Mail size={20} color="#2563EB" />
           </View>
           <View style={styles.contactContent}>
@@ -103,7 +91,7 @@ export function HelpSupport() {
           </TouchableOpacity>
 
         <TouchableOpacity style={[styles.contactCard, rtlRow(rtl)]} onPress={handleWebsite} activeOpacity={0.85}>
-          <View style={[styles.contactIcon, styles.websiteIcon, rtl && styles.contactIconRTL]}>
+          <View style={[styles.contactIcon, styles.websiteIcon]}>
             <Globe size={20} color={colors.primary.DEFAULT} />
           </View>
           <View style={styles.contactContent}>
@@ -113,7 +101,7 @@ export function HelpSupport() {
           </TouchableOpacity>
 
         <View style={[styles.contactCard, rtlRow(rtl)]}>
-          <View style={[styles.contactIcon, styles.locationIcon, rtl && styles.contactIconRTL]}>
+          <View style={[styles.contactIcon, styles.locationIcon]}>
             <MapPin size={20} color="#F97316" />
             </View>
           <View style={styles.contactContent}>
@@ -125,100 +113,41 @@ export function HelpSupport() {
         </View>
 
         {/* FAQ LIST */}
-        <Text style={[styles.sectionLabel, rtlText(rtl)]}>
-          {t('faqTitle') || 'FREQUENTLY ASKED QUESTIONS'}
-        </Text>
+        {!isPaymentsHidden && (
+          <>
+            <Text style={[styles.sectionLabel, rtlText(rtl)]}>
+              {t('faqTitle') || 'FREQUENTLY ASKED QUESTIONS'}
+            </Text>
 
-        {faqs.map((faq, index) => {
-          const isExpanded = expandedFaqIndex === index;
-          return (
-            <View
-              key={index}
-              style={[styles.faqItem, isExpanded && styles.faqItemExpanded]}
-            >
-              <TouchableOpacity
-                style={[styles.faqQuestion, rtlRow(rtl)]}
-                onPress={() => toggleFaq(index)}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.faqQuestionText, rtlText(rtl)]}>{faq.question}</Text>
-                {isExpanded ? (
-                  <HelpCircle size={16} color={colors.foreground.muted} />
-                ) : (
-                  <HelpCircle size={16} color={colors.foreground.muted} />
-                )}
-              </TouchableOpacity>
-              {isExpanded && (
-                <View style={styles.faqAnswer}>
-                  <Text style={[styles.faqAnswerText, rtlText(rtl)]}>{faq.answer}</Text>
+            {faqs.map((faq, index) => {
+              const isExpanded = expandedFaqIndex === index;
+              return (
+                <View
+                  key={index}
+                  style={[styles.faqItem, isExpanded && styles.faqItemExpanded]}
+                >
+                  <TouchableOpacity
+                    style={[styles.faqQuestion, rtlRow(rtl)]}
+                    onPress={() => toggleFaq(index)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.faqQuestionText, rtlText(rtl)]}>{faq.question}</Text>
+                    {isExpanded ? (
+                      <HelpCircle size={16} color={colors.foreground.muted} />
+                    ) : (
+                      <HelpCircle size={16} color={colors.foreground.muted} />
+                    )}
+                  </TouchableOpacity>
+                  {isExpanded && (
+                    <View style={styles.faqAnswer}>
+                      <Text style={[styles.faqAnswerText, rtlText(rtl)]}>{faq.answer}</Text>
+                    </View>
+                  )}
                 </View>
-              )}
-            </View>
-          );
-        })}
-
-        {/* SEND FEEDBACK */}
-        <Text style={[styles.sectionLabel, rtlText(rtl)]}>
-          {t('sendFeedback') || 'SEND FEEDBACK'}
-        </Text>
-
-        <View style={styles.feedbackCard}>
-          <View style={styles.fieldGroup}>
-            <Text style={[styles.fieldLabel, rtlText(rtl)]}>{t('yourName') || 'Your Name'}</Text>
-            <TextInput
-              style={[styles.input, rtlInput(rtl)]}
-              value={name}
-              onChangeText={setName}
-              placeholder={t('enterYourName') || 'Enter your name'}
-              placeholderTextColor={colors.foreground.muted}
-            />
-          </View>
-
-          <View style={styles.fieldGroup}>
-            <Text style={[styles.fieldLabel, rtlText(rtl)]}>{t('emailAddress') || 'Email Address'}</Text>
-            <TextInput
-              style={[styles.input, rtlInput(rtl)]}
-              value={email}
-              onChangeText={setEmail}
-              placeholder={t('enterEmailAddress') || 'Enter your email'}
-              placeholderTextColor={colors.foreground.muted}
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
-          </View>
-
-          <View style={styles.fieldGroup}>
-            <Text style={[styles.fieldLabel, rtlText(rtl)]}>{t('message') || 'Message'}</Text>
-            <TextInput
-              style={[styles.input, styles.messageInput, rtlInput(rtl)]}
-              value={message}
-              onChangeText={setMessage}
-              placeholder={
-                t('tellUsHowWeCanHelp') ||
-                'Tell us how we can help or share your feedback...'
-              }
-              placeholderTextColor={colors.foreground.muted}
-              multiline
-            />
-          </View>
-
-          <TouchableOpacity
-            style={styles.feedbackButtonContainer}
-            onPress={handleSendFeedback}
-            activeOpacity={0.9}
-          >
-            <LinearGradient
-            colors={colors.gradients.primaryButton.colors}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={[styles.feedbackButton, rtlRow(rtl)]}
-            >
-              <Text style={[styles.feedbackButtonText, rtlText(rtl)]}>
-                {t('sendFeedback') || 'Send Feedback'}
-              </Text>
-            </LinearGradient>
-          </TouchableOpacity>
-        </View>
+              );
+            })}
+          </>
+        )}
         </View>
       </ScrollView>
     </View>
@@ -241,9 +170,6 @@ const createStyles = (colors: any, insets: any, typography: any, rtl?: boolean) 
     backgroundColor: colors.background.DEFAULT,
   },
   headerRTL: {
-    flexDirection: 'row',
-  },
-  rowReverse: {
     flexDirection: 'row',
   },
   textRTL: {
@@ -330,10 +256,6 @@ const createStyles = (colors: any, insets: any, typography: any, rtl?: boolean) 
     justifyContent: 'center',
     marginEnd: spacing.md,
   },
-  contactIconRTL: {
-    marginEnd: 0,
-    marginStart: spacing.md,
-  },
   whatsappIcon: {
     backgroundColor: 'rgba(22,163,74,0.08)',
   },
@@ -397,52 +319,6 @@ const createStyles = (colors: any, insets: any, typography: any, rtl?: boolean) 
     ...typography.caption,
     fontSize: 12,
     color: colors.foreground.muted,
-  },
-  feedbackCard: {
-    backgroundColor: colors.card.background,
-    borderRadius: borderRadius.card,
-    borderWidth: 1,
-    borderColor: colors.border.DEFAULT,
-    padding: spacing.md,
-    marginTop: spacing.sm,
-  },
-  fieldGroup: {
-    marginBottom: spacing.md,
-  },
-  fieldLabel: {
-    ...typography.label,
-    fontSize: 13,
-    color: colors.foreground.DEFAULT,
-    marginBottom: spacing.xs,
-  },
-  input: {
-    height: 48,
-    borderRadius: borderRadius.input,
-    borderWidth: 1,
-    borderColor: colors.input.border || colors.border.DEFAULT,
-    backgroundColor: colors.input.background || colors.background.secondary,
-    paddingHorizontal: spacing.md,
-    fontSize: 14,
-    color: colors.foreground.DEFAULT,
-  },
-  messageInput: {
-    minHeight: 96,
-    textAlignVertical: 'top',
-  },
-  feedbackButtonContainer: {
-    marginTop: spacing.sm,
-  },
-  feedbackButton: {
-    height: 52,
-    borderRadius: borderRadius.button,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  feedbackButtonText: {
-    ...typography.body,
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.primary.foreground,
   },
 });
 

@@ -22,11 +22,18 @@ import {
   Megaphone,
 } from 'lucide-react-native';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useRemoteConfig } from '@/contexts/RemoteConfigContext';
+const LOGO_LIGHT = require('../../../assets/images/logo.png');
+const LOGO_DARK = require('../../../assets/images/iconDarkmode.png');
 import { useLanguage } from '@/contexts/LanguageContext';
 import { iconTransformRTL } from '@/utils/rtl';
 import { getFontFamily } from '@/utils/getFontFamily';
 import { formatDistanceToNow, format } from 'date-fns';
 import { useNavigation } from '@react-navigation/native';
+import { safeCall } from '@/utils/safeCall';
+import { getNotificationMessageForDisplay } from '@/utils/errorHandling';
+import { useOwnerAuth } from '@/hooks/useOwnerAuth';
+import { translateNotification } from '@/utils/notificationTranslator';
 
 interface Notification {
   id: string;
@@ -37,14 +44,6 @@ interface Notification {
   created_at: string;
   campaign_id?: string;
 }
-
-const NOTIFICATION_COLORS = {
-  success: '#22C55E',
-  warning: '#EAB308',
-  error: '#EF4444',
-  admin: '#A855F7',
-  info: '#3B82F6',
-};
 
 interface NotificationDetailModalProps {
   visible: boolean;
@@ -65,14 +64,18 @@ export const NotificationDetailModal: React.FC<NotificationDetailModalProps> = (
 }) => {
   const insets = useSafeAreaInsets();
   const { colors, isDark } = useTheme();
+  const { isPaymentsHidden } = useRemoteConfig();
   const { t, language, isRTL } = useLanguage();
+  const { hasAdminAccess } = useOwnerAuth();
   const navigation = useNavigation<any>();
 
   const fontFamily = getFontFamily(language as 'ckb' | 'ar', 'regular');
   const fontFamilySemiBold = getFontFamily(language as 'ckb' | 'ar', 'semibold');
   const fontFamilyMedium = getFontFamily(language as 'ckb' | 'ar', 'medium');
   const fontFamilyBold = getFontFamily(language as 'ckb' | 'ar', 'bold');
-  const styles = createStyles(colors, insets, fontFamily, fontFamilySemiBold, fontFamilyMedium, fontFamilyBold, isRTL);
+  const modalOverlayBg = isDark ? '#0F0F1A' : colors.overlay.dark;
+  const modalCardBg = isDark ? '#1A1A2E' : colors.card.background;
+  const styles = createStyles(colors, insets, fontFamily, fontFamilySemiBold, fontFamilyMedium, fontFamilyBold, isRTL, modalOverlayBg, modalCardBg);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(50)).current;
   const bounceAnim = useRef(new Animated.Value(1)).current;
@@ -118,15 +121,52 @@ export const NotificationDetailModal: React.FC<NotificationDetailModalProps> = (
 
   if (!notification) return null;
 
-  const msgStr = (notification.message && String(notification.message)) || '';
-  const titleStr = (notification.title && String(notification.title)) || '';
-  const isDiscountNotification =
+  /** Fix erroneous ".review" / ". is" in server messages — must be defined before first use (no TDZ). */
+  const normalizeMessage = (msg: string) => {
+    if (msg == null || typeof msg !== 'string') return '';
+    return String(msg).replace(/\s+\.(\w)/g, ' $1').trim();
+  };
+
+  const msgStr = (notification.message != null && String(notification.message)) || '';
+  const titleStr = (notification.title != null && String(notification.title)) || '';
+  const notificationType =
+    notification.type === 'success' ||
+    notification.type === 'warning' ||
+    notification.type === 'error' ||
+    notification.type === 'info' ||
     notification.type === 'admin' ||
-    notification.type === 'discount' ||
+    notification.type === 'discount'
+      ? notification.type
+      : 'info';
+  const isDiscountNotification =
+    notificationType === 'admin' ||
+    notificationType === 'discount' ||
     titleStr.toLowerCase().includes('discount') ||
     msgStr.toLowerCase().includes('discount') ||
     msgStr.toLowerCase().includes('خەسم') ||
     msgStr.toLowerCase().includes('داشکان');
+  const accentColor =
+    notificationType === 'success'
+      ? colors.success
+      : notificationType === 'warning'
+        ? colors.warning
+        : notificationType === 'error'
+          ? colors.error
+          : notificationType === 'admin'
+            ? colors.primary.DEFAULT
+            : colors.info;
+
+  const lang = (language || 'ckb') as 'ckb' | 'ar' | 'en';
+  const translated = translateNotification(titleStr, msgStr, lang);
+  const displayMessage = normalizeMessage(
+    getNotificationMessageForDisplay(
+      msgStr,
+      translated.message ?? '',
+      !!hasAdminAccess,
+      lang === 'ar' ? 'ar' : 'ckb'
+    )
+  );
+  const displayTitle = translated.title ?? titleStr ?? t('notificationTitleGeneric');
 
   const getIcon = () => {
     const size = 22;
@@ -137,7 +177,7 @@ export const NotificationDetailModal: React.FC<NotificationDetailModalProps> = (
         </Animated.View>
       );
     }
-    switch (notification.type) {
+    switch (notificationType) {
       case 'success':
         return <CheckCircle size={size} color={colors.success} />;
       case 'warning':
@@ -152,37 +192,50 @@ export const NotificationDetailModal: React.FC<NotificationDetailModalProps> = (
   };
 
   const handleCTAPress = () => {
-    if (notification.campaign_id && onViewCampaign) {
-      onViewCampaign(notification.campaign_id);
-    } else if (onCreateAd) {
-      onCreateAd();
-    } else {
-      // Fallback to navigation
-      if (notification.campaign_id) {
-        navigation.navigate('CampaignDetail' as never, { campaignId: notification.campaign_id } as never);
+    // Owner/admins: always go to OwnerDashboard → AdReview (highlight this campaign)
+    if (notification.campaign_id && hasAdminAccess) {
+      if (onViewCampaign) {
+        safeCall(onViewCampaign, notification.campaign_id);
       } else {
-        navigation.navigate('Main' as never, { screen: 'CreateAd' } as never);
+        navigation.navigate(
+          'OwnerDashboard' as never,
+          { highlightCampaignId: notification.campaign_id } as never
+        );
       }
+      safeCall(onClose);
+      return;
     }
-    onClose();
+
+    // Regular users: go to their own campaign detail when there is a campaign_id
+    if (notification.campaign_id) {
+      if (onViewCampaign) {
+        safeCall(onViewCampaign, notification.campaign_id);
+      } else {
+        navigation.navigate('CampaignDetail' as never, { id: notification.campaign_id } as never);
+      }
+      safeCall(onClose);
+      return;
+    }
+
+    // Fallback: create ad (promo / generic notifications)
+    if (onCreateAd) {
+      safeCall(onCreateAd);
+    } else {
+      navigation.navigate('Main' as never, { screen: 'CreateAd' } as never);
+    }
+    safeCall(onClose);
   };
 
   const handleClose = () => {
     if (!notification.is_read && onMarkAsRead) {
-      onMarkAsRead(notification.id);
+      safeCall(onMarkAsRead, notification.id);
     }
-    onClose();
+    safeCall(onClose);
   };
 
   const sanitizeNotificationText = (value: string, fallback: string) => {
     // Display text as-is - backend should send correct language
     return value || fallback;
-  };
-
-  /** Fix erroneous ".review" / ". is" in server messages (leading dot after space). */
-  const normalizeMessage = (msg: string) => {
-    if (!msg || typeof msg !== 'string') return msg;
-    return msg.replace(/\s+\.(\w)/g, ' $1').trim();
   };
 
   const formatRelativeTime = (date: Date) => {
@@ -214,6 +267,8 @@ export const NotificationDetailModal: React.FC<NotificationDetailModalProps> = (
     return language === 'ckb' ? `${minutes} خولەک پێش` : `منذ ${minutes} دقيقة`;
   };
 
+  const showPrimaryAction = notification.campaign_id || !isPaymentsHidden;
+
   return (
     <Modal
       visible={visible}
@@ -224,13 +279,14 @@ export const NotificationDetailModal: React.FC<NotificationDetailModalProps> = (
     >
       <View style={styles.overlay}>
         <TouchableOpacity
-          style={styles.backdrop}
+          style={StyleSheet.absoluteFill}
           activeOpacity={1}
           onPress={handleClose}
         />
         <View style={styles.card}>
           <View style={styles.cardGlowTop} pointerEvents="none" />
           <View style={styles.cardGlowBottom} pointerEvents="none" />
+          <View style={[styles.topAccentBar, { backgroundColor: accentColor }]} />
           <View style={[styles.header, isRTL && styles.headerRTL]}>
             <TouchableOpacity
               style={[styles.closeButton, isRTL && styles.closeButtonRTL]}
@@ -240,7 +296,7 @@ export const NotificationDetailModal: React.FC<NotificationDetailModalProps> = (
               <X color={colors.foreground.DEFAULT} size={22} />
             </TouchableOpacity>
             <Image
-              source={require('../../../assets/images/logo.png')}
+              source={isDark ? LOGO_DARK : LOGO_LIGHT}
               style={styles.headerLogo}
               resizeMode="contain"
             />
@@ -248,7 +304,7 @@ export const NotificationDetailModal: React.FC<NotificationDetailModalProps> = (
               {isDiscountNotification ? t('specialOfferLabel') : t('notificationLabel')}
             </Text>
             <Text style={[styles.title, isRTL && styles.textRTL]} numberOfLines={2} allowFontScaling>
-              {sanitizeNotificationText(notification.title, t('notificationTitleGeneric'))}
+              {displayTitle}
             </Text>
           </View>
 
@@ -257,10 +313,19 @@ export const NotificationDetailModal: React.FC<NotificationDetailModalProps> = (
             contentContainerStyle={styles.contentContainer}
             showsVerticalScrollIndicator={false}
           >
-            <View style={[styles.messageRow, isRTL && styles.messageRowRTL]}>
-              <View style={styles.iconBadge}>{getIcon()}</View>
+            <View
+              style={[
+                styles.messageRow,
+                {
+                  backgroundColor: `${accentColor}12`,
+                  borderColor: `${accentColor}26`,
+                },
+                isRTL && styles.messageRowRTL,
+              ]}
+            >
+              <View style={[styles.iconBadge, { backgroundColor: `${accentColor}18` }]}>{getIcon()}</View>
               <Text style={[styles.message, isRTL && styles.textRTL]}>
-                {normalizeMessage(sanitizeNotificationText(notification.message, t('notificationMessageGeneric')))}
+                {displayMessage}
               </Text>
             </View>
             <View style={styles.metadata}>
@@ -276,23 +341,28 @@ export const NotificationDetailModal: React.FC<NotificationDetailModalProps> = (
           </ScrollView>
 
           <View style={[styles.actions, isRTL && styles.actionsRTL]}>
+            {showPrimaryAction ? (
+              <TouchableOpacity
+                style={[styles.primaryButton, styles.actionButtonFill, isRTL && styles.primaryButtonRTL]}
+                onPress={handleCTAPress}
+              >
+                {notification.campaign_id ? (
+                  <>
+                    <ExternalLink color={colors.primary.foreground} size={18} style={iconTransformRTL()} />
+                    <Text style={[styles.primaryButtonText, isRTL && styles.textRTL]} numberOfLines={2} adjustsFontSizeToFit>{t('viewCampaign')}</Text>
+                  </>
+                ) : (
+                  <>
+                    <Plus color={colors.primary.foreground} size={18} style={iconTransformRTL()} />
+                    <Text style={[styles.primaryButtonText, isRTL && styles.textRTL]} numberOfLines={2} adjustsFontSizeToFit>{t('createNewAd')}</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            ) : null}
             <TouchableOpacity
-              style={[styles.primaryButton, styles.actionButtonFill, isRTL && styles.primaryButtonRTL]}
-              onPress={handleCTAPress}
+              style={[styles.secondaryButton, styles.actionButtonFill, !showPrimaryAction && styles.singleActionButton]}
+              onPress={handleClose}
             >
-              {notification.campaign_id ? (
-                <>
-                  <ExternalLink color={colors.primary.foreground} size={18} style={iconTransformRTL()} />
-                  <Text style={[styles.primaryButtonText, isRTL && styles.textRTL]} numberOfLines={2} adjustsFontSizeToFit>{t('viewCampaign')}</Text>
-                </>
-              ) : (
-                <>
-                  <Plus color={colors.primary.foreground} size={18} style={iconTransformRTL()} />
-                  <Text style={[styles.primaryButtonText, isRTL && styles.textRTL]} numberOfLines={2} adjustsFontSizeToFit>{t('createNewAd')}</Text>
-                </>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.secondaryButton, styles.actionButtonFill]} onPress={handleClose}>
               <Text style={[styles.secondaryButtonText, isRTL && styles.textRTL]} numberOfLines={2} adjustsFontSizeToFit>{t('close')}</Text>
             </TouchableOpacity>
           </View>
@@ -309,20 +379,17 @@ const createStyles = (
   fontFamilySemiBold: string,
   fontFamilyMedium: string,
   fontFamilyBold: string,
-  isRTL?: boolean
+  isRTL?: boolean,
+  overlayBg?: string,
+  cardBg?: string
 ) =>
   StyleSheet.create({
-    // Use one deterministic row direction across modal layout.
-    // Prevents mixed LTR/RTL row structures on iOS.
     overlay: {
       flex: 1,
       justifyContent: 'center',
       alignItems: 'center',
-    backgroundColor: colors.overlay.dark,
+      backgroundColor: overlayBg ?? colors.overlay.dark,
       padding: 16,
-    },
-    backdrop: {
-      flex: 1,
     },
     card: {
       width: '100%',
@@ -331,12 +398,16 @@ const createStyles = (
       overflow: 'hidden',
       borderWidth: 1,
       borderColor: colors.primary.DEFAULT + '40',
-      backgroundColor: colors.card.background,
+      backgroundColor: cardBg ?? colors.card.background,
       shadowColor: '#000',
       shadowOffset: { width: 0, height: 8 },
       shadowOpacity: 0.2,
       shadowRadius: 16,
       elevation: 8,
+    },
+    topAccentBar: {
+      height: 4,
+      width: '100%',
     },
     cardGlowTop: {
       position: 'absolute',
@@ -508,6 +579,9 @@ const createStyles = (
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 48,
+  },
+  singleActionButton: {
+    flex: 1,
   },
   secondaryButtonText: {
     fontSize: 15,

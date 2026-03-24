@@ -10,8 +10,8 @@ import {
   Switch,
   ScrollView,
 } from 'react-native';
-import { Image } from 'expo-image';
-import { LinearGradient } from 'expo-linear-gradient';
+import { Image } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import { Search, Trophy, Star, StarOff, X, Save, Eye } from 'lucide-react-native';
 import { supabase } from '@/integrations/supabase/client';
 import { Text } from '@/components/common/Text';
@@ -278,7 +278,7 @@ export const FeaturedAdManager: React.FC = () => {
         {featured ? (
           <View style={styles.featuredContent}>
             {featured.thumbnail_url ? (
-              <Image source={{ uri: featured.thumbnail_url }} style={styles.featuredThumb} contentFit="cover" />
+              <Image source={{ uri: featured.thumbnail_url }} style={styles.featuredThumb} resizeMode="cover" />
             ) : (
               <View style={[styles.featuredThumb, styles.thumbPlaceholder]} />
             )}
@@ -318,7 +318,7 @@ export const FeaturedAdManager: React.FC = () => {
         renderItem={({ item }) => (
           <View style={[styles.campaignItem, item.is_featured && styles.campaignFeatured]}>
             {item.thumbnail_url ? (
-              <Image source={{ uri: item.thumbnail_url }} style={styles.campaignThumb} contentFit="cover" />
+              <Image source={{ uri: item.thumbnail_url }} style={styles.campaignThumb} resizeMode="cover" />
             ) : (
               <View style={[styles.campaignThumb, styles.thumbPlaceholder]} />
             )}

@@ -6,17 +6,19 @@ import { spacing } from '@/theme/spacing';
 import { iconTransformRTL, inputStyleRTL } from '@/utils/rtl';
 import { toast } from '@/utils/toast';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { LinearGradient } from 'expo-linear-gradient';
+import LinearGradient from 'react-native-linear-gradient';
 import { ArrowLeft, Lock } from 'lucide-react-native';
 import React, { useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export function ForgotPasswordNewPassword() {
   const navigation = useNavigation();
   const route = useRoute();
+  const insets = useSafeAreaInsets();
   const { t } = useLanguage();
   const { colors } = useTheme();
-  const styles = createStyles(colors);
+  const styles = createStyles(colors, insets);
   const email = (route.params as any)?.email as string;
   const code = (route.params as any)?.code as string;
 
@@ -26,15 +28,15 @@ export function ForgotPasswordNewPassword() {
 
   const handleReset = async () => {
     if (!newPassword || !confirmPassword) {
-      toast.warning('Required', 'Please enter and confirm your password');
+      toast.warning(t('required'), t('pleaseEnterAndConfirmPassword'));
       return;
     }
     if (newPassword !== confirmPassword) {
-      toast.warning('Passwords do not match', 'Please re-enter your password');
+      toast.warning(t('passwordsDoNotMatch'), t('reEnterPassword'));
       return;
     }
     if (newPassword.length < 8) {
-      toast.warning('Weak password', 'Password must be at least 8 characters');
+      toast.warning(t('weakPassword'), t('weakPassword'));
       return;
     }
 
@@ -49,21 +51,21 @@ export function ForgotPasswordNewPassword() {
       });
 
       if (error) {
-        toast.error('Error', 'Something went wrong. Please try again.');
+        toast.error(t('error'), t('somethingWentWrong'));
         return;
       }
       if (data?.error) {
-        toast.error('Error', (data.error as string) || 'Could not reset password. Please try again.');
+        toast.error(t('error'), t('couldNotResetPassword'));
         return;
       }
 
       Alert.alert(
-        'Success',
-        'Password reset successfully! You can now log in with your new password.',
-        [{ text: 'OK', onPress: () => navigation.navigate('Auth', { screen: 'Login' }) }]
+        t('success'),
+        t('passwordResetSuccess'),
+        [{ text: t('ok'), onPress: () => navigation.navigate('Auth', { screen: 'Login' }) }]
       );
     } catch (err: any) {
-      toast.error('Error', 'Something went wrong. Please try again.');
+      toast.error(t('error'), t('somethingWentWrong'));
     } finally {
       setLoading(false);
     }
@@ -129,18 +131,19 @@ export function ForgotPasswordNewPassword() {
   );
 }
 
-const createStyles = (colors: any) =>
+const createStyles = (colors: any, insets: { top: number; bottom: number }) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background.DEFAULT },
     content: {
       flex: 1,
       paddingHorizontal: spacing.screenPadding,
-      paddingTop: spacing[8],
+      paddingTop: insets.top + spacing[6],
+      paddingBottom: insets.bottom + spacing[4],
     },
     backButton: {
       position: 'absolute',
       start: spacing[4],
-      top: spacing[6],
+      top: insets.top + spacing[2],
       zIndex: 10,
     },
     iconCircle: {

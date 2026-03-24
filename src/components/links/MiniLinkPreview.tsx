@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet } from 'react-native';
-import { Image as ExpoImage } from 'expo-image';
-import { LinearGradient } from 'expo-linear-gradient';
+import { Image } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import { Text } from '@/components/common/Text';
 import { useTheme } from '@/contexts/ThemeContext';
 import { 
@@ -18,12 +18,14 @@ import {
   AtSign,
   Store
 } from 'lucide-react-native';
+import { BrandSnapchatIcon } from '@/components/icons/BrandSnapchatIcon';
 
 // Platform icon configuration with exact brand colors
 const createPlatformIcons = (themeColors: any): Record<string, { icon: any; color: string }> => ({
   whatsapp: { icon: MessageCircle, color: '#25D366' },
   viber: { icon: Phone, color: '#7360F2' },
   instagram: { icon: Instagram, color: '#E4405F' },
+  snapchat: { icon: BrandSnapchatIcon, color: '#FFFC00' },
   facebook: { icon: Facebook, color: '#1877F2' },
   phone: { icon: Phone, color: '#1A1A2E' },
   telegram: { icon: Send, color: '#0088CC' },
@@ -92,10 +94,10 @@ export const MiniLinkPreview: React.FC<MiniLinkPreviewProps> = ({
         {/* Avatar - React Native requires source={{ uri }} and explicit dimensions */}
         <View style={styles.avatarContainer}>
           {avatarUrl && typeof avatarUrl === 'string' && avatarUrl.startsWith('https://') && !imageFailed ? (
-            <ExpoImage
+            <Image
               source={{ uri: avatarUrl }}
               style={styles.avatar}
-              contentFit="cover"
+              resizeMode="cover"
               onError={() => setImageFailed(true)}
             />
           ) : (

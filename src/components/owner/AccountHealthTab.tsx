@@ -4,7 +4,7 @@ import { ownerApi } from '@/services/ownerApi';
 import { borderRadius, spacing } from '@/theme/spacing';
 import { inputStyleRTL, isRTL, rtlText } from '@/utils/rtl';
 import { toast } from '@/utils/toast';
-import Slider from '@react-native-community/slider';
+import { AdaptiveSlider } from '@/components/common/AdaptiveSlider';
 import { Activity as ActivityIcon, AlertTriangle, BarChart3, CheckCircle, DollarSign, Edit2, Heart, Minus, Plus, Power, RefreshCw, Save, X, XCircle } from 'lucide-react-native';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
@@ -75,7 +75,7 @@ export const AccountHealthTab: React.FC<AccountHealthTabProps> = ({ colors, t, l
       setHealthData(advertisersWithStats);
     } catch (err) {
       console.error('Failed to fetch health data:', err);
-      toast.error('Error', 'Something went wrong');
+      toast.error(t('error'), t('somethingWentWrong'));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -122,7 +122,7 @@ export const AccountHealthTab: React.FC<AccountHealthTabProps> = ({ colors, t, l
 
   const saveName = async (accountId: string) => {
     if (!editName.trim()) {
-      toast.error('Error', 'Something went wrong');
+      toast.error(t('error'), t('somethingWentWrong'));
       return;
     }
 
@@ -130,7 +130,7 @@ export const AccountHealthTab: React.FC<AccountHealthTabProps> = ({ colors, t, l
     try {
       const data = await ownerApi.updateName(accountId, editName.trim());
 
-      toast.success('Success', 'Operation completed');
+      toast.success(t('success'), t('operationCompleted'));
 
       // Update local state
       setHealthData((prev) =>
@@ -141,7 +141,7 @@ export const AccountHealthTab: React.FC<AccountHealthTabProps> = ({ colors, t, l
 
       cancelEditing();
     } catch (err: any) {
-      toast.error('Error', 'Something went wrong');
+      toast.error(t('error'), t('somethingWentWrong'));
     } finally {
       setSaving(false);
     }
@@ -159,14 +159,14 @@ export const AccountHealthTab: React.FC<AccountHealthTabProps> = ({ colors, t, l
   const saveMaxAds = async (accountId: string) => {
     const value = Math.round(editMaxAdsValue);
     if (value < MIN_MAX_ADS || value > MAX_MAX_ADS) {
-      toast.error('Error', `Max ads must be between ${MIN_MAX_ADS} and ${MAX_MAX_ADS}`);
+      toast.error(t('error'), t('somethingWentWrong'));
       return;
     }
 
     setSavingMaxAds(true);
     try {
       await ownerApi.updateMaxAds(accountId, value);
-      toast.success('Success', 'Max ads updated');
+      toast.success(t('success'), t('operationCompleted'));
 
       setHealthData((prev) =>
         prev.map((acc) =>
@@ -175,7 +175,7 @@ export const AccountHealthTab: React.FC<AccountHealthTabProps> = ({ colors, t, l
       );
       setEditingMaxAdsId(null);
     } catch (err: any) {
-      toast.error('Error', 'Failed to update max ads');
+      toast.error(t('error'), t('somethingWentWrong'));
     } finally {
       setSavingMaxAds(false);
     }
@@ -187,12 +187,12 @@ export const AccountHealthTab: React.FC<AccountHealthTabProps> = ({ colors, t, l
       // Update status to active
       const data = await ownerApi.updateStatus(account.id, 'active');
 
-      toast.success('Success', 'Operation completed');
+      toast.success(t('success'), t('operationCompleted'));
 
       // Refresh data
       fetchHealthData(true);
     } catch (err: any) {
-      toast.error('Error', 'Something went wrong');
+      toast.error(t('error'), t('somethingWentWrong'));
     } finally {
       setSaving(false);
     }
@@ -430,7 +430,7 @@ export const AccountHealthTab: React.FC<AccountHealthTabProps> = ({ colors, t, l
                             <Plus size={20} color={colors.primary.DEFAULT} />
                           </Pressable>
                         </View>
-                        <Slider
+                        <AdaptiveSlider
                           style={styles.maxAdsSlider}
                           minimumValue={MIN_MAX_ADS}
                           maximumValue={MAX_MAX_ADS}

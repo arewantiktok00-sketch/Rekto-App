@@ -8,7 +8,6 @@ export function useOwnerAuth() {
   const [isReviewer, setIsReviewer] = useState(false);
   const [isReviewerOnly, setIsReviewerOnly] = useState(false);
   const [loading, setLoading] = useState(true);
-  const SUPABASE_URL = 'https://uivgyexyakfincwgghgh.supabase.co';
 
   useEffect(() => {
     if (user) {
@@ -42,18 +41,11 @@ export function useOwnerAuth() {
         return;
       }
 
-      // Use owner-check edge function (no JWT required)
-      const response = await fetch(`${SUPABASE_URL}/functions/v1/owner-check`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: user.email }),
+      // Use owner-check edge function via Supabase SDK
+      const { data, error } = await supabase.functions.invoke('owner-check', {
+        body: { email: user.email },
       });
-
-      if (!response.ok) {
-        throw new Error('Failed to check owner status');
-      }
-
-      const data = await response.json();
+      if (error) throw error;
       if (data) {
         const ownerStatus = data.isOwner === true;
         const reviewerStatus = data.isReviewer === true;

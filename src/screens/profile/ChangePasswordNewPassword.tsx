@@ -1,15 +1,15 @@
-import React, { useState } from 'react';
-import { View, StyleSheet, TextInput, TouchableOpacity, Alert } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
-import { useTheme } from '@/contexts/ThemeContext';
-import { useLanguage } from '@/contexts/LanguageContext';
-import { supabase } from '@/integrations/supabase/client';
-import { LinearGradient } from 'expo-linear-gradient';
-import { spacing } from '@/theme/spacing';
-import { toast } from '@/utils/toast';
-import { Text } from '@/components/common/Text';
 import { ScreenHeader } from '@/components/common/ScreenHeader';
+import { Text } from '@/components/common/Text';
+import { useLanguage } from '@/contexts/LanguageContext';
+import { useTheme } from '@/contexts/ThemeContext';
+import { supabase } from '@/integrations/supabase/client';
+import { spacing } from '@/theme/spacing';
 import { inputStyleRTL } from '@/utils/rtl';
+import { toast } from '@/utils/toast';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import { useState } from 'react';
+import { StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 
 export function ChangePasswordNewPassword() {
   const navigation = useNavigation();
@@ -24,15 +24,15 @@ export function ChangePasswordNewPassword() {
 
   const handleSubmit = async () => {
     if (!newPassword || !confirmPassword) {
-      toast.warning('Required', 'Please enter and confirm your password');
+      toast.warning(t('required'), t('enterConfirmPassword'));
       return;
     }
     if (newPassword !== confirmPassword) {
-      toast.warning('Passwords do not match', 'Please re-enter your password');
+      toast.warning(t('passwordsDoNotMatch'), t('enterConfirmPassword'));
       return;
     }
     if (newPassword.length < 8) {
-      toast.warning('Weak password', 'Password must be at least 8 characters');
+      toast.warning(t('weakPassword'), t('minCharacters'));
       return;
     }
     setLoading(true);
@@ -41,17 +41,17 @@ export function ChangePasswordNewPassword() {
         body: { action: 'change_password', email: email?.trim()?.toLowerCase(), code, newPassword },
       });
       if (error) {
-        toast.error('Error', error.message || 'Failed to change password');
+        toast.error(t('error'), t('changePassword'));
         return;
       }
       if (data?.error || data?.success === false) {
-        toast.error('Error', (data?.error as string) || 'Failed to change password');
+        toast.error(t('error'), t('changePassword'));
         return;
       }
-      toast.success('Success', 'Password changed successfully');
+      toast.success(t('success'), t('passwordChanged'));
       navigation.navigate('PrivacySecurity' as never);
     } catch (err: any) {
-      toast.error('Error', err.message || 'Failed to change password');
+      toast.error(t('error'), t('changePassword'));
     } finally {
       setLoading(false);
     }

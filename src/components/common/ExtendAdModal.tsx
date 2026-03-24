@@ -1,35 +1,42 @@
+import { AdaptiveSlider } from '@/components/common/AdaptiveSlider';
 import { Text } from '@/components/common/Text';
+import { ChevronBackIcon } from '@/components/icons/ChevronBackIcon';
+import { useAuth } from '@/contexts/AuthContext';
+import { useOwnerAuth } from '@/hooks/useOwnerAuth';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { supabase, supabaseRead } from '@/integrations/supabase/client';
-import { calculateTotalWithTax, MIN_EXTENSION_BUDGET_USD } from '@/lib/pricing';
+import { usePricingConfig } from '@/hooks/usePricingConfig';
+import { calculateTax, MIN_EXTENSION_BUDGET_USD } from '@/lib/pricing';
 import { borderRadius, spacing } from '@/theme/spacing';
 import { getFontFamilyByLanguage } from '@/utils/fonts';
 import { inputStyleRTL } from '@/utils/rtl';
+import { formatIntegerLatinDigitsOnly } from '@/utils/currency';
+import { getErrorMessageForUser } from '@/utils/errorHandling';
 import { toast } from '@/utils/toast';
-import BottomSheet, { BottomSheetBackdrop, BottomSheetScrollView, BottomSheetView } from '@gorhom/bottom-sheet';
-import Slider from '@react-native-community/slider';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Check, ChevronDown, ChevronUp, Copy, X } from 'lucide-react-native';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Clipboard, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import { Check, ChevronDown, ChevronUp, Copy, Wallet, X } from 'lucide-react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Clipboard, Modal, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
-const DEFAULT_EXCHANGE_RATE = 1450;
 
 interface ExtendAdModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   campaignId: string;
   campaignTitle: string;
-  dailyBudget: number;  // Campaign's current daily budget
+  dailyBudget: number;  // Campaign's current daily budget (fallback when totalBudget/durationDays not provided)
+  totalBudget?: number;  // Original campaign total_budget for correct extension pricing
+  durationDays?: number;  // Original campaign duration_days
+  realEndDate?: string | null;  // Current real_end_date (YYYY-MM-DD) for new end date calculation
+  extensionStatus?: 'awaiting_payment' | 'verifying_payment' | 'processing' | null;
   onSuccess: () => void;  // Callback after successful submission
 }
 
 const paymentMethods = [
-  { id: 'fastpay', name: 'FastPay', account: '7504881516' },
-  { id: 'fib', name: 'FIB', account: '7504881516' },
-  { id: 'superqi', name: 'SuperQi / Qi Card', account: '4734053731' },
+  { id: 'fastpay', name: 'FastPay', account: '0750 488 1516' },
+  { id: 'fib', name: 'FIB', account: '0750 488 1516' },
+  { id: 'superqi', name: 'Qi Card', account: '4734053731' },
 ];
 
 export const ExtendAdModal: React.FC<ExtendAdModalProps> = ({
@@ -38,76 +45,91 @@ export const ExtendAdModal: React.FC<ExtendAdModalProps> = ({
   campaignId,
   campaignTitle,
   dailyBudget,
+  totalBudget,
+  durationDays,
+  realEndDate,
+  extensionStatus,
   onSuccess,
 }) => {
+  const isProcessing = extensionStatus === 'processing';
+  const { user } = useAuth();
+  const { hasAdminAccess } = useOwnerAuth();
   const { t, language } = useLanguage();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const bottomSheetRef = useRef<BottomSheet>(null);
   const [step, setStep] = useState<'select' | 'payment'>('select');
   const [extensionDays, setExtensionDays] = useState(1);
   const [senderName, setSenderName] = useState('');
   const [amountIQD, setAmountIQD] = useState('');
   const [selectedMethod, setSelectedMethod] = useState<string | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<'bank' | 'wallet'>('bank');
   const [loading, setLoading] = useState(false);
   const [breakdownExpanded, setBreakdownExpanded] = useState(false);
-  const [exchangeRate, setExchangeRate] = useState(DEFAULT_EXCHANGE_RATE);
   const [copiedAccount, setCopiedAccount] = useState<string | null>(null);
+  const [walletBalance, setWalletBalance] = useState<number>(0);
+  const { convertToIQD, exchange_rate } = usePricingConfig();
+  const iqdDisplay = (n: number) => formatIntegerLatinDigitsOnly(n);
 
-  // Fetch exchange rate from app_settings
   useEffect(() => {
-    const fetchExchangeRate = async () => {
+    if (!open || !user) return;
+    const fetchWallet = async () => {
       try {
         const { data } = await supabaseRead
-          .from('app_settings')
-          .select('value')
-          .eq('key', 'exchange_rate')
+          .from('profiles')
+          .select('wallet_balance')
+          .eq('user_id', user.id)
           .maybeSingle();
-        
-        if (data?.value) {
-          setExchangeRate(Number(data.value) || DEFAULT_EXCHANGE_RATE);
-        }
-      } catch (error) {
-        console.error('Failed to fetch exchange rate:', error);
+        setWalletBalance(Number(data?.wallet_balance ?? 0));
+      } catch (e) {
+        console.error('Failed to fetch wallet balance:', e);
       }
     };
-    fetchExchangeRate();
-  }, []);
+    fetchWallet();
+  }, [open, user]);
 
-  // Open/close bottom sheet based on open prop
+  // Reset step and payment method when modal opens
   useEffect(() => {
-    if (open) {
-      bottomSheetRef.current?.snapToIndex(0);
-    } else {
-      bottomSheetRef.current?.close();
+    if (!open) {
+      setStep('select');
+      setPaymentMethod('bank');
+      setSelectedMethod(null);
     }
   }, [open]);
 
-  const snapPoints = React.useMemo(() => ['90%'], []);
-
-  // Calculate pricing using centralized pricing functions
-  // Minimum $20/day for extensions (even if campaign is $10/day)
-  const extensionAmountUSD = extensionDays * Math.max(dailyBudget, MIN_EXTENSION_BUDGET_USD);
-  const pricing = calculateTotalWithTax(extensionAmountUSD, exchangeRate);
-  
-  // IMPORTANT: API receives BASE budget (without tax)
-  // Tax is platform revenue, not ad spend
-  const baseBudgetUSD = extensionDays * Math.max(dailyBudget, MIN_EXTENSION_BUDGET_USD);
+  // Extension pricing: costPerDay = max(daily_budget, 20), baseBudgetUSD = extensionDays * costPerDay, tax from table, totalUSD = base + tax
+  const safeDailyBudget = Number.isFinite(Number(dailyBudget)) && Number(dailyBudget) > 0
+    ? Number(dailyBudget)
+    : MIN_EXTENSION_BUDGET_USD;
+  const costPerDay = Math.max(safeDailyBudget, MIN_EXTENSION_BUDGET_USD);
+  const baseBudgetUSD = extensionDays * costPerDay;
+  const taxAmount = calculateTax(baseBudgetUSD);
+  const totalUSD = baseBudgetUSD + taxAmount;
+  const totalIQD = Math.floor(totalUSD * exchange_rate);
+  const safeTotalBudget = totalBudget != null && Number(totalBudget) > 0 ? Number(totalBudget) : null;
+  const newTotalBudget = safeTotalBudget != null ? safeTotalBudget + baseBudgetUSD : undefined;
+  const newEndDate = realEndDate
+    ? (() => {
+        const d = new Date(realEndDate);
+        d.setDate(d.getDate() + extensionDays);
+        return d.toISOString().slice(0, 10);
+      })()
+    : undefined;
+  const pricing = { budget: baseBudgetUSD, tax: taxAmount, totalUSD, totalIQD, newTotalBudget, newEndDate };
 
   // Auto-fill IQD amount when days change
   useEffect(() => {
     if (step === 'payment') {
-      setAmountIQD(pricing.totalIQD.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ','));
+      setAmountIQD(iqdDisplay(pricing.totalIQD));
     }
   }, [extensionDays, step, pricing.totalIQD]);
 
   const handleClose = useCallback(() => {
-    // Reset all state on close
     setStep('select');
     setExtensionDays(1);
     setSenderName('');
     setAmountIQD('');
     setSelectedMethod(null);
+    setPaymentMethod('bank');
     setBreakdownExpanded(false);
     setCopiedAccount(null);
     onOpenChange(false);
@@ -116,7 +138,7 @@ export const ExtendAdModal: React.FC<ExtendAdModalProps> = ({
   const handleContinue = () => {
     // Validation: extensionDays must be >= 1
     if (extensionDays < 1 || extensionDays > 7) {
-      toast.error('Error', 'Something went wrong');
+      toast.error(t('error'), t('somethingWentWrong'));
       return;
     }
     setStep('payment');
@@ -130,7 +152,7 @@ export const ExtendAdModal: React.FC<ExtendAdModalProps> = ({
     try {
       Clipboard.setString(account);
       setCopiedAccount(methodId);
-      toast.success('Success', 'Operation completed');
+      toast.success(t('success'), t('operationCompleted'));
       setTimeout(() => setCopiedAccount(null), 2000);
     } catch (error) {
       console.error('Failed to copy:', error);
@@ -138,55 +160,72 @@ export const ExtendAdModal: React.FC<ExtendAdModalProps> = ({
   };
 
   const handleSubmit = async () => {
-    // Validation Step 2: selectedMethod required, senderName >= 2 chars, amountIQD not empty
-    if (!selectedMethod) {
-      toast.error('Error', 'Something went wrong');
-      return;
-    }
+    const isWallet = paymentMethod === 'wallet';
 
-    if (!senderName.trim() || senderName.trim().length < 2) {
-      toast.error('Error', 'Something went wrong');
-      return;
-    }
-
-    const amountIQDClean = amountIQD.replace(/,/g, '');
-    if (!amountIQDClean || parseFloat(amountIQDClean) !== pricing.totalIQD) {
-      toast.error('Error', 'Something went wrong');
-      return;
+    if (!isWallet) {
+      if (!selectedMethod) {
+        toast.error(t('error'), t('somethingWentWrong'));
+        return;
+      }
+      if (!senderName.trim() || senderName.trim().length < 2) {
+        toast.error(t('error'), t('somethingWentWrong'));
+        return;
+      }
+      const amountIQDClean = amountIQD.replace(/,/g, '').trim();
+      const amountIqdNum = parseInt(amountIQDClean, 10);
+      if (!amountIQDClean || Number.isNaN(amountIqdNum) || amountIqdNum !== pricing.totalIQD) {
+        toast.error(t('error'), t('somethingWentWrong'));
+        return;
+      }
+    } else {
+      // Wallet must have enough for base + tax (totalUSD), but we only ever store/sync the BASE budget in USD.
+      if (walletBalance < pricing.totalUSD) {
+        toast.error(t('error'), t('somethingWentWrong'));
+        return;
+      }
     }
 
     setLoading(true);
     try {
+      const body: Record<string, unknown> = {
+        action: 'extension-payment',
+        campaignId,
+        extensionDays,
+        extensionAmount: pricing.budget,
+        transactionId: isWallet ? 'wallet-payment' : senderName.trim(),
+        paymentMethod: isWallet ? 'wallet' : selectedMethod,
+        amountIQD: isWallet ? String(pricing.totalIQD) : amountIQD.replace(/,/g, ''),
+      };
+      if (pricing.newTotalBudget != null) body.newTotalBudget = pricing.newTotalBudget;
+      if (pricing.newEndDate) body.newEndDate = pricing.newEndDate;
+      if (!isWallet) {
+        body.senderName = senderName.trim();
+      }
+
       const { data, error } = await supabase.functions.invoke('admin-review', {
-        body: {
-          action: 'extension-payment',
-          campaignId,
-          extensionDays,
-          extensionAmount: baseBudgetUSD, // ✅ BASE ONLY - no tax (tax is platform revenue, not ad spend)
-          transactionId: senderName.trim(),
-          paymentMethod: selectedMethod, // 'fastpay' | 'fib' | 'superqi'
-          amountIQD: amountIQDClean,
-        },
+        body,
       });
 
       if (error) {
-        console.error('[admin-review] extension-payment SDK error:', error);
-        Alert.alert('Error', 'Network error. Please check your connection and try again.');
+        const msg = getErrorMessageForUser(error, data ?? null, hasAdminAccess, language === 'ar' ? 'ar' : 'ckb');
+        Alert.alert(hasAdminAccess ? 'Error' : (language === 'ckb' ? 'هەڵە' : 'خطأ'), msg);
         return;
       }
-      if (!data?.success) {
-        const errorMsg = data?.error || 'Failed to submit extension request';
-        console.error('[admin-review] extension-payment business error:', errorMsg);
-        Alert.alert('Action Failed', errorMsg);
+      if (data?.success === false) {
+        const msg = getErrorMessageForUser(null, data, hasAdminAccess, language === 'ar' ? 'ar' : 'ckb');
+        Alert.alert(hasAdminAccess ? 'Error' : (language === 'ckb' ? 'هەڵە' : 'خطأ'), msg);
         return;
       }
 
-      toast.success('Success', data?.message || 'Operation completed');
+      const successMsg = language === 'ckb'
+        ? 'داواکاری درێژکردنەوە بە سەرکەوتوویی نێردرا'
+        : 'تم إرسال طلب التمديد بنجاح';
+      Alert.alert(language === 'ckb' ? 'سەرکەوتوو' : 'تم', successMsg);
       handleClose();
       onSuccess();
     } catch (err: any) {
-      console.error('[admin-review] extension-payment unexpected error:', err);
-      Alert.alert('Error', 'Something went wrong. Please try again.');
+      const msg = getErrorMessageForUser(err, null, hasAdminAccess, language === 'ar' ? 'ar' : 'ckb');
+      Alert.alert(hasAdminAccess ? 'Error' : (language === 'ckb' ? 'هەڵە' : 'خطأ'), msg);
     } finally {
       setLoading(false);
     }
@@ -196,45 +235,26 @@ export const ExtendAdModal: React.FC<ExtendAdModalProps> = ({
   const isRTL = language === 'ckb' || language === 'ar';
   const styles = createStyles(colors, fontFamily, isRTL, breakdownExpanded);
 
-  const renderBackdrop = useCallback(
-    (props: any) => (
-      <BottomSheetBackdrop
-        {...props}
-        disappearsOnIndex={-1}
-        appearsOnIndex={0}
-        opacity={0.5}
-      />
-    ),
-    []
-  );
-
+  const canSubmitBank =
+    !!selectedMethod && senderName.trim().length >= 2 && !!amountIQD.replace(/,/g, '');
+  const canSubmitWallet = walletBalance >= pricing.totalUSD;
   const canSubmit =
+    !isProcessing &&
     !loading &&
-    !!selectedMethod &&
-    senderName.trim().length >= 2 &&
-    !!amountIQD.replace(/,/g, '');
-
+    (paymentMethod === 'wallet' ? canSubmitWallet : canSubmitBank);
 
   return (
-    <BottomSheet
-      ref={bottomSheetRef}
-      index={open ? 0 : -1}
-      snapPoints={snapPoints}
-      enablePanDownToClose
-      keyboardBehavior="extend"
-      keyboardBlurBehavior="restore"
-      topInset={insets.top}
-      bottomInset={0}
-      onClose={handleClose}
-      backdropComponent={renderBackdrop}
-      backgroundStyle={styles.bottomSheetBackground}
-      handleIndicatorStyle={styles.handleIndicator}
+    <Modal
+      visible={open}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={handleClose}
     >
-      <BottomSheetView style={styles.container}>
+      <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.headerTitle}>
-            {step === 'select' 
+            {step === 'select'
               ? `📅 ${t('extendAdDuration') || 'Extend Ad Duration'}`
               : `💳 ${t('payAndExtend') || 'Pay & Extend'}`}
           </Text>
@@ -243,13 +263,11 @@ export const ExtendAdModal: React.FC<ExtendAdModalProps> = ({
           </TouchableOpacity>
         </View>
 
-        <BottomSheetScrollView
+        <ScrollView
           style={styles.content}
-          contentContainerStyle={[
-            styles.contentContainer,
-            { paddingBottom: insets.bottom + spacing.lg }
-          ]}
+          contentContainerStyle={[styles.contentContainer, { paddingBottom: insets.bottom + spacing.lg }]}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
         >
           {step === 'select' ? (
             <>
@@ -266,17 +284,19 @@ export const ExtendAdModal: React.FC<ExtendAdModalProps> = ({
                 <View style={styles.sliderValueContainer}>
                   <Text style={styles.sliderValue}>{extensionDays} {extensionDays === 1 ? t('day') || 'Day' : t('days') || 'Days'}</Text>
                 </View>
-                <Slider
-                  style={styles.slider}
-                  minimumValue={1}
-                  maximumValue={7}
-                  step={1}
-                  value={extensionDays}
-                  onValueChange={setExtensionDays}
-                  minimumTrackTintColor={colors.primary.DEFAULT}
-                  maximumTrackTintColor={colors.border.DEFAULT}
-                  thumbTintColor={colors.primary.DEFAULT}
-                />
+                <View pointerEvents={isProcessing ? 'none' : 'auto'}>
+                  <AdaptiveSlider
+                    style={styles.slider}
+                    minimumValue={1}
+                    maximumValue={7}
+                    step={1}
+                    value={extensionDays}
+                    onValueChange={setExtensionDays}
+                    minimumTrackTintColor={colors.primary.DEFAULT}
+                    maximumTrackTintColor={colors.border.DEFAULT}
+                    thumbTintColor={colors.primary.DEFAULT}
+                  />
+                </View>
                 <View style={styles.sliderLabels}>
                   <Text style={styles.sliderLabelText}>1 {t('day') || 'Day'}</Text>
                   <Text style={styles.sliderLabelText}>7 {t('days') || 'Days'}</Text>
@@ -301,16 +321,8 @@ export const ExtendAdModal: React.FC<ExtendAdModalProps> = ({
                 {breakdownExpanded && (
                   <View style={styles.breakdownContent}>
                     <View style={styles.costRow}>
-                      <Text style={styles.costLabel}>{t('costPerDay') || 'Cost per day'}</Text>
-                      <Text style={styles.costValue}>${Math.max(dailyBudget, MIN_EXTENSION_BUDGET_USD).toFixed(2)}/{t('perDay') || 'day'}</Text>
-                    </View>
-                    <View style={styles.costRow}>
-                      <Text style={styles.costLabel}>{t('duration') || 'Duration'}</Text>
-                      <Text style={styles.costValue}>{extensionDays} {extensionDays === 1 ? t('day') || 'day' : t('days') || 'days'}</Text>
-                    </View>
-                    <View style={styles.costRow}>
-                      <Text style={styles.costLabel}>{t('subtotal') || 'Subtotal'}</Text>
-                      <Text style={styles.costValue}>${pricing.budget.toFixed(2)}</Text>
+                      <Text style={styles.costLabel}>{t('base') || 'Base'}</Text>
+                      <Text style={styles.costValue}>${costPerDay.toFixed(2)} × {extensionDays} {extensionDays === 1 ? (t('day') || 'day') : (t('days') || 'days')} = ${pricing.budget.toFixed(2)}</Text>
                     </View>
                     <View style={styles.costRow}>
                       <Text style={styles.costLabel}>{t('tax') || 'Tax'}</Text>
@@ -322,10 +334,10 @@ export const ExtendAdModal: React.FC<ExtendAdModalProps> = ({
                 
                 <View style={styles.totalSection}>
                   <Text style={styles.totalLabel}>{t('total') || 'Total'}</Text>
-                  <Text style={styles.totalUSD}>(${pricing.totalUSD.toFixed(1)} USD)</Text>
                   <Text style={styles.totalIQD}>
-                    {pricing.totalIQD.toLocaleString()} IQD (دینار)
+                    {iqdDisplay(pricing.totalIQD)} IQD
                   </Text>
+                  <Text style={styles.totalUSD}>(${pricing.totalUSD.toFixed(2)} USD)</Text>
                 </View>
               </View>
 
@@ -336,8 +348,9 @@ export const ExtendAdModal: React.FC<ExtendAdModalProps> = ({
 
               {/* Continue Button */}
               <TouchableOpacity
-                style={styles.continueButton}
+                style={[styles.continueButton, isProcessing && styles.submitButtonDisabled]}
                 onPress={handleContinue}
+                disabled={isProcessing}
                 activeOpacity={0.8}
               >
                 <LinearGradient
@@ -346,9 +359,13 @@ export const ExtendAdModal: React.FC<ExtendAdModalProps> = ({
                   end={{ x: 1, y: 0 }}
                   style={styles.continueButtonGradient}
                 >
-                  <Text style={styles.continueButtonText}>
-                    {t('continueToPayment') || 'Continue to Payment'}
-                  </Text>
+                  {isProcessing ? (
+                    <ActivityIndicator color={colors.primary.foreground} />
+                  ) : (
+                    <Text style={styles.continueButtonText}>
+                      {t('continueToPayment') || 'Continue to Payment'}
+                    </Text>
+                  )}
                 </LinearGradient>
               </TouchableOpacity>
 
@@ -361,7 +378,7 @@ export const ExtendAdModal: React.FC<ExtendAdModalProps> = ({
                   {t('extendingBy')?.replace('{days}', extensionDays.toString()) || `Extending by ${extensionDays} Days`}
                 </Text>
                 <Text style={styles.summaryIQD}>
-                  {pricing.totalIQD.toLocaleString()} IQD (دینار)
+                  IQD {iqdDisplay(pricing.totalIQD)} (دینار)
                 </Text>
                 <Text style={styles.summaryUSD}>
                   (${pricing.totalUSD.toFixed(1)} USD)
@@ -370,26 +387,69 @@ export const ExtendAdModal: React.FC<ExtendAdModalProps> = ({
 
               {/* Payment Method Selection */}
               <Text style={styles.sectionLabel}>{t('selectPaymentMethod') || 'Select Payment Method'}</Text>
+
+              {/* Pay with Balance */}
+              <TouchableOpacity
+                style={[
+                  styles.paymentMethodCard,
+                  paymentMethod === 'wallet' && styles.paymentMethodCardSelected,
+                  walletBalance < pricing.totalUSD && styles.paymentMethodCardDisabled,
+                ]}
+                onPress={() => {
+                  if (walletBalance >= pricing.totalUSD) {
+                    setPaymentMethod('wallet');
+                    setSelectedMethod(null);
+                  }
+                }}
+                activeOpacity={0.7}
+                disabled={walletBalance < pricing.totalUSD}
+              >
+                <View style={styles.paymentMethodContent}>
+                  <View style={styles.paymentMethodRadio}>
+                    {paymentMethod === 'wallet' && (
+                      <View style={styles.paymentMethodRadioSelected} />
+                    )}
+                  </View>
+                  <View style={styles.paymentMethodInfo}>
+                    <Text style={[
+                      styles.paymentMethodName,
+                      paymentMethod === 'wallet' && styles.paymentMethodNameSelected,
+                    ]}>
+                      {t('payWithBalance') || 'Pay with Balance'}
+                    </Text>
+                    <Text style={styles.paymentMethodAccount}>
+                      {walletBalance >= pricing.totalUSD
+                        ? `$${walletBalance.toFixed(2)} ${t('available') || 'available'}`
+                        : `${t('needMore') || 'Need'} $${(pricing.totalUSD - walletBalance).toFixed(2)} ${t('more') || 'more'}`}
+                    </Text>
+                  </View>
+                  <Wallet size={20} color={paymentMethod === 'wallet' ? colors.primary.DEFAULT : colors.foreground.muted} />
+                </View>
+              </TouchableOpacity>
+
               {paymentMethods.map((method) => (
                 <TouchableOpacity
                   key={method.id}
                   style={[
                     styles.paymentMethodCard,
-                    selectedMethod === method.id && styles.paymentMethodCardSelected,
+                    paymentMethod === 'bank' && selectedMethod === method.id && styles.paymentMethodCardSelected,
                   ]}
-                  onPress={() => setSelectedMethod(method.id)}
+                  onPress={() => {
+                    setPaymentMethod('bank');
+                    setSelectedMethod(method.id);
+                  }}
                   activeOpacity={0.7}
                 >
                   <View style={styles.paymentMethodContent}>
                     <View style={styles.paymentMethodRadio}>
-                      {selectedMethod === method.id && (
+                      {paymentMethod === 'bank' && selectedMethod === method.id && (
                         <View style={styles.paymentMethodRadioSelected} />
                       )}
                     </View>
                     <View style={styles.paymentMethodInfo}>
                       <Text style={[
                         styles.paymentMethodName,
-                        selectedMethod === method.id && styles.paymentMethodNameSelected,
+                        paymentMethod === 'bank' && selectedMethod === method.id && styles.paymentMethodNameSelected,
                       ]}>
                         {method.name}
                       </Text>
@@ -412,6 +472,9 @@ export const ExtendAdModal: React.FC<ExtendAdModalProps> = ({
                 </TouchableOpacity>
               ))}
 
+              {/* Bank transfer fields - only when paying by bank */}
+              {paymentMethod === 'bank' && (
+                <>
               {/* Sender Name */}
               <Text style={styles.inputLabel}>
                 {isRTL ? 'ناوی نێردەر' : ''} {t('senderName') || 'Sender Name'} {isRTL ? '' : '(ناوی نێردەر)'}
@@ -439,7 +502,7 @@ export const ExtendAdModal: React.FC<ExtendAdModalProps> = ({
                   const formatted = cleaned.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
                   setAmountIQD(formatted);
                 }}
-                placeholder={pricing.totalIQD.toLocaleString()}
+                placeholder={iqdDisplay(pricing.totalIQD)}
                 placeholderTextColor={colors.input.placeholder}
                 keyboardType="numeric"
                 textAlign={isRTL ? 'right' : 'left'}
@@ -447,23 +510,29 @@ export const ExtendAdModal: React.FC<ExtendAdModalProps> = ({
               <Text style={styles.hint}>
                 ⚠️ {t('makePaymentFirst') || 'Please make the payment first'}
               </Text>
+                </>
+              )}
 
               {/* Action Buttons */}
               <View style={styles.actionButtons}>
                 <TouchableOpacity
-                  style={styles.backButton}
+                  style={[styles.backButton, isProcessing && styles.submitButtonDisabled]}
                   onPress={handleBack}
+                  disabled={isProcessing}
                   activeOpacity={0.8}
                 >
-                  <Text style={styles.backButtonText}>{t('back') || 'Back'}</Text>
+                  <View style={styles.backButtonContent}>
+                    <ChevronBackIcon size={20} color={colors.foreground.DEFAULT} isRTL={isRTL} />
+                    <Text style={styles.backButtonText}>{t('back') || 'Back'}</Text>
+                  </View>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[
                     styles.submitButton,
-                    !canSubmit && styles.submitButtonDisabled,
+                    (!canSubmit || isProcessing) && styles.submitButtonDisabled,
                   ]}
                   onPress={handleSubmit}
-                  disabled={!canSubmit}
+                  disabled={!canSubmit || isProcessing}
                   activeOpacity={0.8}
                 >
                   <LinearGradient
@@ -472,7 +541,7 @@ export const ExtendAdModal: React.FC<ExtendAdModalProps> = ({
                     end={{ x: 1, y: 0 }}
                     style={styles.submitButtonGradient}
                   >
-                    {loading ? (
+                    {loading || isProcessing ? (
                       <ActivityIndicator color={colors.primary.foreground} />
                     ) : (
                       <Text style={styles.submitButtonText}>
@@ -485,21 +554,15 @@ export const ExtendAdModal: React.FC<ExtendAdModalProps> = ({
 
             </>
           )}
-        </BottomSheetScrollView>
-      </BottomSheetView>
-    </BottomSheet>
+        </ScrollView>
+      </View>
+    </Modal>
   );
 };
 
 const createStyles = (colors: any, fontFamily: string, isRTL: boolean, breakdownExpanded: boolean) => {
   const rowDir = 'row';
   return StyleSheet.create({
-  bottomSheetBackground: {
-    backgroundColor: colors.background.DEFAULT,
-  },
-  handleIndicator: {
-    backgroundColor: colors.border.DEFAULT,
-  },
   container: {
     flex: 1,
     backgroundColor: colors.background.DEFAULT,
@@ -697,8 +760,10 @@ const createStyles = (colors: any, fontFamily: string, isRTL: boolean, breakdown
   paymentMethodCardSelected: {
     borderColor: colors.primary.DEFAULT,
     backgroundColor: 'rgba(124, 58, 237, 0.1)',
-    // Ring effect around selected
     borderWidth: 2,
+  },
+  paymentMethodCardDisabled: {
+    opacity: 0.6,
   },
   paymentMethodContent: {
     flexDirection: 'row',
@@ -779,6 +844,11 @@ const createStyles = (colors: any, fontFamily: string, isRTL: boolean, breakdown
     paddingVertical: spacing.md + 4,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  backButtonContent: {
+    flexDirection: isRTL ? 'row-reverse' : 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   backButtonText: {
     fontSize: 16,

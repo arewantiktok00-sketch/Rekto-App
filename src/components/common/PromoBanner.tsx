@@ -9,7 +9,7 @@ import { spacing } from '@/theme/spacing';
 import { iconTransformRTL } from '@/utils/rtl';
 import { toast } from '@/utils/toast';
 import { useNavigation } from '@react-navigation/native';
-import { LinearGradient } from 'expo-linear-gradient';
+import LinearGradient from 'react-native-linear-gradient';
 import { ChevronRight, Sparkles } from 'lucide-react-native';
 import React, { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, TouchableOpacity, View } from 'react-native';
@@ -28,7 +28,7 @@ interface PromoBannerSettings {
 
 export function PromoBanner() {
   const navigation = useNavigation();
-  const { language } = useLanguage();
+  const { language, t } = useLanguage();
   const { user } = useAuth();
   const { colors } = useTheme();
   const [promoData, setPromoData] = useState<PromoBannerSettings | null>(null);
@@ -138,7 +138,7 @@ export function PromoBanner() {
 
     try {
       // 1. Show toast
-      toast.success('Success', 'Operation completed');
+      toast.success(t('success'), t('accountReady'));
 
       // 2. Create in-app notification
       await supabase.functions.invoke('owner-content', {
@@ -213,7 +213,7 @@ export function PromoBanner() {
         end={{ x: 1, y: 0 }}
         style={styles.container}
       >
-        <View style={[styles.row, isRTL && styles.rowRTL]}>
+        <View style={styles.row}>
           <View style={styles.iconWrap}>
             <Sparkles size={24} color={colors.primary.foreground} />
           </View>
@@ -221,7 +221,7 @@ export function PromoBanner() {
             <Text style={styles.title}>{bannerText}</Text>
             <Text style={styles.subtitle}>{perDayText}</Text>
           </View>
-          <View style={[styles.priceWrap, isRTL && { alignItems: 'flex-start' }]}>
+          <View style={styles.priceWrap}>
             <Text style={styles.price}>{display_price_iqd.toLocaleString()}</Text>
             <Text style={styles.currency}>IQD</Text>
           </View>
@@ -248,9 +248,6 @@ const createStyles = (colors: any, isRTL: boolean) => {
   row: {
     flexDirection: rowDir,
     alignItems: 'center',
-  },
-  rowRTL: {
-    flexDirection: rowDir,
   },
   iconWrap: {
     padding: 8,

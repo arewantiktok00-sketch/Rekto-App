@@ -1,44 +1,5 @@
 {
-  "expo": {
-    "name": "RektoApp",
-    "slug": "RektoApp",
-    "version": "1.0.0",
-    "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
-    "scheme": "rektoapp",
-    "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
-    "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.RektoApp"
-    },
-    "web": {
-      "output": "static",
-      "favicon": "./assets/images/favicon.png"
-    },
-    "fonts": [
-      "src/assets/fonts/Rabar_021.ttf",
-      "src/assets/fonts/Poppins-Regular.ttf",
-      "src/assets/fonts/Poppins-Medium.ttf",
-      "src/assets/fonts/Poppins-SemiBold.ttf",
-      "src/assets/fonts/Poppins-Bold.ttf"
-    ],
-    "plugins": [
-      "expo-router",
-      [
-        "expo-splash-screen",
-        {
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 200,
-          "resizeMode": "contain",
-          "backgroundColor": "#ffffff",
-          "dark": { "backgroundColor": "#000000" }
-        }
-      ]
-    ],
-    "experiments": {
-      "typedRoutes": true,
-      "reactCompiler": true
-    }
-  }
+  "name": "Rekto",
+  "displayName": "Rekto",
+  "version": "1.0.0"
 }

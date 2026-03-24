@@ -144,7 +144,7 @@ export function AppControlTab({ colors, t }: AppControlTabProps) {
       }
     } catch (error: any) {
       console.error('[AppControl] Fetch error:', error);
-      toast.error('Error', 'Something went wrong');
+      toast.error(t('error'), t('somethingWentWrong'));
     } finally {
       setLoading(false);
     }
@@ -169,7 +169,7 @@ export function AppControlTab({ colors, t }: AppControlTabProps) {
       toast.success('Success', 'Operation completed');
     } catch (error: any) {
       console.error('[AppControl] Save error:', error);
-      Alert.alert('Error', error.message || 'Failed to save settings');
+      toast.error(t('error'), t('somethingWentWrong'));
     } finally {
       setSaving(false);
     }
@@ -505,22 +505,21 @@ export function AppControlTab({ colors, t }: AppControlTabProps) {
             </TouchableOpacity>
 
             {showDatePicker && (
-              <DateTimePicker
-                value={localSettings.maintenance.until ? new Date(localSettings.maintenance.until) : new Date()}
-                mode="datetime"
-                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                onChange={(event, date) => {
-                  // CRITICAL: Hide picker FIRST before any state updates
-                  setShowDatePicker(false);
-                  
-                  // Only update if date was selected (not dismissed)
-                  if (event && event.type === 'set' && date) {
-                    updateMaintenance({ until: date.toISOString() });
-                  }
-                  // Do NOT call any .dismiss() methods here
-                }}
-                minimumDate={new Date()}
-              />
+              <View style={styles.dateTimePickerContainer}>
+                <DateTimePicker
+                  value={localSettings.maintenance.until ? new Date(localSettings.maintenance.until) : new Date()}
+                  mode="datetime"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  onChange={(event, date) => {
+                    setShowDatePicker(false);
+                    if (event && event.type === 'set' && date) {
+                      updateMaintenance({ until: date.toISOString() });
+                    }
+                  }}
+                  minimumDate={new Date()}
+                  style={Platform.OS === 'ios' ? styles.dateTimePickerWheel : undefined}
+                />
+              </View>
             )}
           </>
         )}
@@ -986,6 +985,17 @@ const createStyles = (colors: any, typography: any) => StyleSheet.create({
     color: colors.foreground.muted,
     textAlign: 'center',
     marginTop: spacing.sm,
+  },
+  dateTimePickerContainer: {
+    backgroundColor: colors.card.background,
+    borderRadius: 16,
+    padding: 16,
+    overflow: 'hidden',
+    maxHeight: 300,
+    marginTop: spacing.sm,
+  },
+  dateTimePickerWheel: {
+    height: 200,
   },
 });
 

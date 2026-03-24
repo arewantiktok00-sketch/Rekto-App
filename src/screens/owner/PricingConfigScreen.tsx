@@ -7,6 +7,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { getTypographyStyles } from '@/theme/typography';
 import { spacing } from '@/theme/spacing';
 import { Text } from '@/components/common/Text';
+import { FALLBACK_EXCHANGE_RATE } from '@/lib/exchangeRate';
 import { inputStyleRTL } from '@/utils/rtl';
 
 export function PricingConfigScreen() {
@@ -16,7 +17,7 @@ export function PricingConfigScreen() {
   const typography = getTypographyStyles(language as 'ckb' | 'ar');
   const styles = createStyles(colors, insets, typography);
   
-  const [exchangeRate, setExchangeRate] = useState('1450');
+  const [exchangeRate, setExchangeRate] = useState(String(FALLBACK_EXCHANGE_RATE));
   const [tenDollarAdsEnabled, setTenDollarAdsEnabled] = useState(true);
   const [taxTable, setTaxTable] = useState<Record<number, number>>({
     10: 3.3,
@@ -47,7 +48,7 @@ export function PricingConfigScreen() {
         .single();
       
       if (data?.value) {
-        const exchangeRateValue = data.value.pricing?.exchange_rate ?? 1450;
+        const exchangeRateValue = data.value.pricing?.exchange_rate ?? FALLBACK_EXCHANGE_RATE;
         const tenDollarEnabled = data.value.pricing?.ten_dollar_ads_enabled ?? true;
         const savedTaxTable = data.value.pricing?.tax_table;
         
@@ -122,7 +123,7 @@ export function PricingConfigScreen() {
 
       const currentValue = current?.value || {};
       const newPricing = {
-        exchange_rate: parseFloat(exchangeRate) || 1450,
+        exchange_rate: parseFloat(exchangeRate) || FALLBACK_EXCHANGE_RATE,
         ten_dollar_ads_enabled: tenDollarAdsEnabled,
         tax_table: taxTable
       };
@@ -171,7 +172,7 @@ export function PricingConfigScreen() {
           value={exchangeRate}
           onChangeText={setExchangeRate}
           keyboardType="numeric"
-          placeholder="1450"
+          placeholder={String(FALLBACK_EXCHANGE_RATE)}
           placeholderTextColor="#6B7280"
         />
         <Text style={styles.hint}>Current: 1 USD = {exchangeRate} IQD</Text>

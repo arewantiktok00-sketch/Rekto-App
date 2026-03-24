@@ -1,24 +1,37 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, InteractionManager, Linking, Alert } from 'react-native';
-import { useRoute, useNavigation } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { CampaignStatusBadge } from '@/components/common/CampaignStatusBadge';
+import { ExtendAdModal } from '@/components/common/ExtendAdModal';
+import { ScreenHeader } from '@/components/common/ScreenHeader';
+import { Text } from '@/components/common/Text';
+import { TransactionIdInput } from '@/components/common/TransactionIdInput';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { supabase, safeQuery } from '@/integrations/supabase/client';
-import { getFontFamily } from '@/theme/typography';
-import { CampaignStatusBadge } from '@/components/common/CampaignStatusBadge';
-import { StatCard } from '@/components/common/StatCard';
-import { TransactionIdInput } from '@/components/common/TransactionIdInput';
-import { ExtendAdModal } from '@/components/common/ExtendAdModal';
-import { Eye, DollarSign, Clock, CreditCard, Play, MousePointer, Target, FileText, Check, Sparkles, X, ChevronDown, ChevronUp, Users, Calendar, Rocket, Plus, Megaphone } from 'lucide-react-native';
-import { Image } from 'react-native';
+import { useRemoteConfig } from '@/contexts/RemoteConfigContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { spacing, borderRadius } from '@/theme/spacing';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Text } from '@/components/common/Text';
-import { ScreenHeader } from '@/components/common/ScreenHeader';
-import { toast } from '@/utils/toast';
+import { useTikTokSync } from '@/hooks/useTikTokSync';
+import { safeQuery, supabase } from '@/integrations/supabase/client';
+import { useOwnerAuth } from '@/hooks/useOwnerAuth';
+import { usePricingConfig } from '@/hooks/usePricingConfig';
 import { getCached, getGlobalCache, setCached } from '@/services/globalCache';
+import { getErrorMessageForUser } from '@/utils/errorHandling';
+import { formatIQD } from '@/utils/currency';
+import { borderRadius, spacing } from '@/theme/spacing';
+import { getFontFamily } from '@/theme/typography';
+import { getDisplayBudget, getExtensionStatusText } from '@/utils/campaignBudget';
+import { calculateTax } from '@/lib/pricing';
+import { formatDateNumericDMY, formatDateTimeNumeric, formatTime24 } from '@/utils/dateFormat';
+import { fetchTikTokPublicUrl, isValidTikTokPublicUrl, shouldHydrateTikTokPublicUrl } from '@/utils/tiktokVideoLink';
+import { toast } from '@/utils/toast';
+import { translateObjective } from '@/utils/transactionCampaignTranslator';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
+import { useCampaignRealtime } from '@/hooks/useCampaignRealtime';
+import { Calendar, ChevronDown, ChevronUp, Clock, CreditCard, DollarSign, Eye, FileText, Megaphone, Play, Plus, Rocket, Sparkles, Target, Users, X } from 'lucide-react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import * as RN from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import LinearGradient from 'react-native-linear-gradient';
+
+const { ActivityIndicator, Alert, Image, InteractionManager, Linking, Modal, RefreshControl, ScrollView, StyleSheet, TouchableOpacity, View } = RN;
 
 interface CampaignData {
   id: string;
@@ -27,6 +40,7 @@ interface CampaignData {
   status: string;
   daily_budget: number;
   total_budget: number;
+  target_spend?: number | null;
   real_budget?: number | null;
   duration_days: number;
   spend: number;
@@ -48,9 +62,10 @@ interface CampaignData {
   tiktok_campaign_status?: string | null;
   tiktok_public_url?: string | null;
   tiktok_video_id?: string | null;
+  tiktok_adgroup_id?: string | null;
   video_url?: string | null;
   api_error?: string | null;
-  extension_status?: 'awaiting_payment' | 'verifying_payment' | null;
+  extension_status?: 'awaiting_payment' | 'verifying_payment' | 'processing' | null;
   pause_locked?: boolean | null;
   is_paused_by_user?: boolean | null;
 }
@@ -72,19 +87,24 @@ export function CampaignDetail() {
   const { user } = useAuth();
   const { t, language, isRTL } = useLanguage();
   const { colors } = useTheme();
+  const { isPaymentsHidden } = useRemoteConfig();
+  const { hasAdminAccess } = useOwnerAuth();
+  const { convertToIQD } = usePricingConfig();
   const fontFamily = getFontFamily(language as 'ckb' | 'ar');
   
   // Create styles with current font family (must be before any usage)
   const styles = createStyles(colors, fontFamily, isRTL);
-  
-  const { id } = route.params as { id: string };
-  const cachedCampaign = getCached<CampaignData | null>(`campaign_${id}`, null);
+
+  // Null guards: avoid reading from undefined route.params / layout refs
+  const params = route?.params ?? {};
+  const id = (params as { id?: string }).id;
+  const cachedCampaign = getCached<CampaignData | null>(id ? `campaign_${id}` : '', null);
   const cachedCampaigns = getCached<CampaignData[]>('campaigns', []);
   const cachedFromList =
-    cachedCampaigns.find((item) => item?.id === id) ||
-    getGlobalCache().campaignsById.get(id) ||
+    (id && cachedCampaigns.find((item) => item?.id === id)) ||
+    (id ? getGlobalCache().campaignsById.get(id) ?? null : null) ||
     null;
-  const cachedTransactions = getCached<Transaction[]>(`campaign_transactions_${id}`, []);
+  const cachedTransactions = getCached<Transaction[]>(id ? `campaign_transactions_${id}` : '', []);
 
   const [campaign, setCampaign] = useState<CampaignData | null>(cachedCampaign || cachedFromList);
   const [transactions, setTransactions] = useState<Transaction[]>(cachedTransactions);
@@ -95,16 +115,58 @@ export function CampaignDetail() {
   const [detailsExpanded, setDetailsExpanded] = useState(false);
   const extendPromptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const EXTEND_PROMPT_KEY = (cid: string) => `extend_prompt_shown_${cid}`;
-  const EXTEND_PROMPT_MS = 30 * 60 * 1000;
+  const EXTEND_PROMPT_MS = 60 * 60 * 1000;
   const [thumbnailError, setThumbnailError] = useState(false);
-  const [canPauseAds, setCanPauseAds] = useState(false);
+  const [canExtendAds, setCanExtendAds] = useState(false);
+  const [pauseProfile, setPauseProfile] = useState<{ can_pause_ads?: boolean; daily_pause_limit?: number } | null>(null);
+  const [isPausing, setIsPausing] = useState(false);
   const [showPauseSuccessCard, setShowPauseSuccessCard] = useState(false);
   const [pauseLimitInfo, setPauseLimitInfo] = useState<{ daily_limit: number; remaining: number } | null>(null);
+  const [walletBalance, setWalletBalance] = useState(0);
   const lastFetchRef = useRef(0);
+  const initialLoadDone = useRef(false);
   const MIN_FETCH_INTERVAL = 2000;
   const hasVideoLink =
-    (typeof campaign?.tiktok_public_url === 'string' && campaign?.tiktok_public_url.includes('/@')) ||
-    !!campaign?.video_url;
+    !isPaymentsHidden &&
+    (
+      (typeof campaign?.tiktok_public_url === 'string' && campaign?.tiktok_public_url.includes('/@')) ||
+      !!campaign?.video_url
+    );
+
+  /**
+   * Persist campaign to state + caches. Incoming row from DB wins for budget/dates/status.
+   * Only views/spend/leads/clicks use Math.max (monotonic metrics).
+   */
+  const persistCampaignSnapshot = useCallback(async (incoming: CampaignData) => {
+    setCampaign((prev) => {
+      const base = prev ? { ...prev, ...incoming } : { ...incoming };
+      return {
+        ...base,
+        views: Math.max(prev?.views || 0, incoming.views || 0),
+        spend: Math.max(prev?.spend || 0, incoming.spend || 0),
+        leads: Math.max(prev?.leads || 0, incoming.leads || 0),
+        clicks: Math.max(prev?.clicks || 0, incoming.clicks || 0),
+      } as CampaignData;
+    });
+    // Caches must store same merge; use last known from memory + incoming + metric max
+    const prevCached = getCached<CampaignData | null>(`campaign_${id}`, null) || getGlobalCache().campaignsById.get(id) || null;
+    const baseCache = prevCached ? { ...prevCached, ...incoming } : { ...incoming };
+    const mergedSnapshot: CampaignData = {
+      ...baseCache,
+      views: Math.max(prevCached?.views || 0, incoming.views || 0),
+      spend: Math.max(prevCached?.spend || 0, incoming.spend || 0),
+      leads: Math.max(prevCached?.leads || 0, incoming.leads || 0),
+      clicks: Math.max(prevCached?.clicks || 0, incoming.clicks || 0),
+    } as CampaignData;
+    setCached(`campaign_${id}`, mergedSnapshot);
+    getGlobalCache().campaignsById.set(id, mergedSnapshot);
+    try {
+      await AsyncStorage.setItem(
+        `campaign_cache_${id}`,
+        JSON.stringify({ data: mergedSnapshot, timestamp: Date.now() })
+      );
+    } catch (_) {}
+  }, [id]);
 
   useEffect(() => {
     setThumbnailError(false);
@@ -126,9 +188,11 @@ export function CampaignDetail() {
             resizeMode="cover"
             onError={() => setThumbnailError(true)}
           />
-          <View style={styles.playOverlay}>
-            <Play color={colors.primary.foreground} fill={colors.primary.foreground} size={24} />
-          </View>
+          {!isPaymentsHidden && (
+            <View style={styles.playOverlay}>
+              <Play color={colors.primary.foreground} fill={colors.primary.foreground} size={24} />
+            </View>
+          )}
         </View>
       );
     }
@@ -150,19 +214,12 @@ export function CampaignDetail() {
   const resolveLegacyVideoUrl = useCallback(async () => {
     if (!campaign?.video_url || !supabase) return null;
     try {
-      const { data, error } = await supabase.functions.invoke('tiktok-video-info', {
-        body: {
-          authCode: campaign.video_url,
-          campaignId: campaign.id,
-        },
+      return await fetchTikTokPublicUrl({
+        id: campaign.id,
+        video_url: campaign.video_url,
+        status: campaign.status,
+        tiktok_public_url: campaign.tiktok_public_url,
       });
-      if (error) {
-        if (__DEV__) {
-          console.warn('[CampaignDetail] Legacy video fetch failed:', error.message);
-        }
-        return null;
-      }
-      return data?.videoInfo?.tiktokUrl || data?.tiktokUrl || null;
     } catch (err) {
       if (__DEV__) {
         console.warn('[CampaignDetail] Legacy video fetch error:', err);
@@ -170,6 +227,31 @@ export function CampaignDetail() {
       return null;
     }
   }, [campaign?.id, campaign?.video_url]);
+
+  useEffect(() => {
+    if (!campaign || !shouldHydrateTikTokPublicUrl(campaign)) return;
+
+    let isMounted = true;
+    fetchTikTokPublicUrl({
+      id: campaign.id,
+      video_url: campaign.video_url,
+      status: campaign.status,
+      tiktok_public_url: campaign.tiktok_public_url,
+    })
+      .then((url) => {
+        if (!isMounted || !isValidTikTokPublicUrl(url)) return;
+        setCampaign((prev) => (prev ? { ...prev, tiktok_public_url: url } : prev));
+        setCached(`campaign_${campaign.id}`, {
+          ...(getCached<CampaignData | null>(`campaign_${campaign.id}`, null) || campaign),
+          tiktok_public_url: url,
+        });
+      })
+      .catch(() => {});
+
+    return () => {
+      isMounted = false;
+    };
+  }, [campaign]);
 
   const handleViewVideo = useCallback(async () => {
     if (!campaign) return;
@@ -181,25 +263,29 @@ export function CampaignDetail() {
       url = await resolveLegacyVideoUrl();
     }
     if (!url) {
-      Alert.alert(t('error') || 'Error', t('noVideoUrl') || 'No video URL available');
+      Alert.alert(t('error'), t('noVideoUrl'));
       return;
     }
     const canOpen = await Linking.canOpenURL(url);
     if (canOpen) {
       await Linking.openURL(url);
     } else {
-      Alert.alert(t('error') || 'Error', t('cannotOpenUrl') || 'Cannot open this URL');
+      Alert.alert(t('error'), t('cannotOpenUrl'));
     }
   }, [campaign, resolveLegacyVideoUrl, t]);
 
-  const fetchCampaign = useCallback(async () => {
+  const fetchCampaign = useCallback(async (force = false, silent = false) => {
     if (!user || !id) return;
 
     const now = Date.now();
-    if (now - lastFetchRef.current < MIN_FETCH_INTERVAL) {
+    if (!force && now - lastFetchRef.current < MIN_FETCH_INTERVAL) {
       return;
     }
     lastFetchRef.current = now;
+
+    if (!silent && !initialLoadDone.current) {
+      setLoading(true);
+    }
 
     try {
       const [campaignResult, transactionResult, profileResult] = await Promise.allSettled([
@@ -222,7 +308,7 @@ export function CampaignDetail() {
         safeQuery((client) =>
           client
             .from('profiles')
-            .select('can_pause_ads, daily_pause_limit')
+            .select('can_pause_ads, can_extend_ads, daily_pause_limit, wallet_balance')
             .eq('user_id', user.id)
             .maybeSingle()
         ),
@@ -233,22 +319,7 @@ export function CampaignDetail() {
         if (error) {
           console.error('Error fetching campaign:', error);
         } else if (data) {
-          setCampaign((prev) => {
-            if (!prev) return data;
-            return {
-              ...data,
-              views: Math.max(prev.views || 0, data.views || 0),
-              spend: Math.max(prev.spend || 0, data.spend || 0),
-              leads: Math.max(prev.leads || 0, data.leads || 0),
-              clicks: Math.max(prev.clicks || 0, data.clicks || 0),
-            };
-          });
-          setCached(`campaign_${id}`, data);
-          getGlobalCache().campaignsById.set(id, data);
-          await AsyncStorage.setItem(
-            `campaign_cache_${id}`,
-            JSON.stringify({ data, timestamp: Date.now() })
-          );
+          await persistCampaignSnapshot(data);
         }
       }
 
@@ -258,8 +329,13 @@ export function CampaignDetail() {
       }
 
       if (profileResult.status === 'fulfilled') {
-        const profile = profileResult.value.data as { can_pause_ads?: boolean; daily_pause_limit?: number } | null;
-        setCanPauseAds(Boolean(profile?.can_pause_ads));
+        const profile = profileResult.value.data as { can_pause_ads?: boolean; can_extend_ads?: boolean; daily_pause_limit?: number; wallet_balance?: number } | null;
+        setCanExtendAds(Boolean(profile?.can_extend_ads));
+        setPauseProfile({
+          can_pause_ads: Boolean(profile?.can_pause_ads),
+          daily_pause_limit: Number(profile?.daily_pause_limit) || 1,
+        });
+        setWalletBalance(Number(profile?.wallet_balance) ?? 0);
         const limit = profile?.daily_pause_limit ?? 1;
         const today = new Date().toISOString().slice(0, 10);
         const pauseRes = await safeQuery((client) =>
@@ -275,11 +351,70 @@ export function CampaignDetail() {
       }
     } catch (error) {
       console.error('Error:', error);
+      if (!silent) {
+        toast.error(t('error') || 'Error', t('failedToLoad') || 'Failed to load');
+      }
     } finally {
+      initialLoadDone.current = true;
       setLoading(false);
       setLastUpdated(new Date());
     }
-  }, [user, id]);
+  }, [user, id, persistCampaignSnapshot, t]);
+
+  // Focus refresh — ALWAYS silent (no spinner, no toast)
+  useFocusEffect(
+    useCallback(() => {
+      if (!id || !user) return;
+      if (initialLoadDone.current) {
+        fetchCampaign(true, true);
+      }
+    }, [id, user?.id, fetchCampaign])
+  );
+
+  const handleRefresh = useCallback(async () => {
+    await fetchCampaign(true, true);
+    await tiktokRefresh();
+  }, [fetchCampaign, tiktokRefresh]);
+
+  const handleCampaignRealtime = useCallback(
+    async (payload: { eventType: string; new?: any; old?: any }) => {
+      if (payload.eventType === 'DELETE') {
+        setCampaign(null);
+        return;
+      }
+      if ((payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') && payload.new) {
+        const newStatus = (payload.new?.status || '').toLowerCase();
+        const oldStatus = (payload.old?.status || '').toLowerCase();
+        await persistCampaignSnapshot(payload.new as CampaignData);
+        setLastUpdated(new Date());
+        // No success toasts for status changes from realtime/refresh (silent refresh rule)
+        if (newStatus === 'rejected' || newStatus === 'failed') {
+          toast.info(t('rejected') || 'Rejected', language === 'ckb' ? 'کامپەین ڕەتکرایەوە' : 'تم رفض الحملة');
+        }
+      }
+    },
+    [persistCampaignSnapshot, t, language]
+  );
+
+  useCampaignRealtime({
+    campaignId: id || undefined,
+    enabled: !!user && !!id,
+    onUpdate: handleCampaignRealtime,
+  });
+
+  const { refresh: tiktokRefresh } = useTikTokSync({
+    campaignId: id || undefined,
+    autoSync: true,
+    pollingInterval: 15000,
+    onSyncComplete: () => fetchCampaign(true, true),
+  });
+
+  // Auto-refresh every 15s — silent (no spinner, no toast)
+  useEffect(() => {
+    if (!id || !user) return;
+    const interval = setInterval(() => fetchCampaign(true, true), 15000);
+    return () => clearInterval(interval);
+  }, [id, user?.id, fetchCampaign]);
 
   useEffect(() => {
     let isMounted = true;
@@ -308,16 +443,9 @@ export function CampaignDetail() {
 
     loadCached();
     InteractionManager.runAfterInteractions(() => {
-      fetchCampaign();
+      fetchCampaign(true);
     });
 
-    const interval = setInterval(() => {
-      InteractionManager.runAfterInteractions(() => {
-        fetchCampaign();
-      });
-    }, 15000);
-
-    let campaignChannel: any;
     let transactionChannel: any;
     let profileChannel: any;
 
@@ -327,25 +455,19 @@ export function CampaignDetail() {
         .on(
           'postgres_changes',
           { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `user_id=eq.${user.id}` },
-          (payload) => setCanPauseAds(Boolean((payload.new as any)?.can_pause_ads))
-        )
-        .subscribe();
-
-      campaignChannel = supabase
-        .channel(`campaign-${id}`)
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'campaigns',
-            filter: `id=eq.${id}`,
-          },
-          () => {
-            fetchCampaign();
+          (payload) => {
+            const n = payload.new as any;
+            setCanExtendAds(Boolean(n?.can_extend_ads));
+            setPauseProfile((prev) => ({
+              ...(prev || {}),
+              can_pause_ads: Boolean(n?.can_pause_ads),
+              daily_pause_limit: Number(n?.daily_pause_limit) || (prev?.daily_pause_limit ?? 1),
+            }));
           }
         )
         .subscribe();
+
+      // Campaign row updates handled by useCampaignRealtime({ campaignId }) — avoids duplicate channels
 
       transactionChannel = supabase
         .channel(`campaign-transactions-${id}`)
@@ -358,7 +480,7 @@ export function CampaignDetail() {
             filter: `campaign_id=eq.${id}`,
           },
           () => {
-            fetchCampaign();
+            fetchCampaign(true, true);
           }
         )
         .subscribe();
@@ -366,27 +488,29 @@ export function CampaignDetail() {
 
     return () => {
       isMounted = false;
-      clearInterval(interval);
       if (supabase) {
-        if (campaignChannel) supabase.removeChannel(campaignChannel);
         if (transactionChannel) supabase.removeChannel(transactionChannel);
         if (profileChannel) supabase.removeChannel(profileChannel);
       }
     };
-  }, [user, id, fetchCampaign]);
+  }, [user, id, fetchCampaign, persistCampaignSnapshot]);
 
-  // Extend prompt: 30-minute auto-hide via AsyncStorage (persists across restarts)
+  // Extend prompt: 1-hour auto-hide via AsyncStorage. Eligibility: can_extend_ads, active, tiktok_adgroup_id, daily_budget >= 20, no pending extension.
   useEffect(() => {
     if (!campaign?.id) return;
     const status = (campaign.status || '').toLowerCase();
-    const spentPercentage = campaign.total_budget > 0
-      ? ((campaign.spend || 0) / campaign.total_budget) * 100
-      : 0;
+    const dailyBudget = Number(campaign.daily_budget) || 0;
+    const spentPercentage = displayBudget > 0 ? ((campaign.spend || 0) / displayBudget) * 100 : 0;
+    const extStatus = campaign.extension_status;
+    const noPendingExtension = extStatus !== 'verifying_payment' && extStatus !== 'processing' && !extStatus;
+    const hasTiktokAdGroup = !!(campaign as any).tiktok_adgroup_id;
     const canExtend =
-      (status === 'active' || status === 'running' || status === 'completed' || status === 'paused') &&
-      campaign.daily_budget >= 20 &&
-      !campaign.extension_status &&
-      spentPercentage >= 75;
+      canExtendAds &&
+      hasTiktokAdGroup &&
+      status === 'active' &&
+      spentPercentage >= 75 &&
+      dailyBudget >= 20 &&
+      noPendingExtension;
     if (!canExtend) {
       setExtendPromptVisible(false);
       return;
@@ -423,7 +547,7 @@ export function CampaignDetail() {
         extendPromptTimerRef.current = null;
       }
     };
-  }, [campaign?.id, campaign?.status, campaign?.total_budget, campaign?.spend, campaign?.daily_budget, campaign?.extension_status]);
+  }, [campaign?.id, campaign?.status, displayBudget, campaign?.spend, campaign?.daily_budget, campaign?.extension_status, canExtendAds]);
 
   const handleMaybeLaterOrCloseExtend = useCallback(async () => {
     if (!campaign?.id) return;
@@ -431,92 +555,159 @@ export function CampaignDetail() {
     setExtendPromptVisible(false);
   }, [campaign?.id]);
 
-  const handlePauseAd = async () => {
+  const handlePause = async () => {
     if (!campaign) return;
-    const status = (campaign.status || '').toLowerCase();
-    const spend = campaign.spend ?? 0;
-    const pauseLocked = !!(campaign as any).pause_locked;
-    const isPausedByUser = !!(campaign as any).is_paused_by_user;
+    try {
+      setIsPausing(true);
 
-    if (!canPauseAds) {
-      Alert.alert(t('noPermission') || 'No Permission', t('noPermissionPause') || 'You do not have permission to pause ads.');
-      return;
+      const { data, error } = await supabase.functions.invoke('user-pause-ad', {
+        body: { campaign_id: campaign.id },
+      });
+
+      // This should NOT happen anymore since the function returns HTTP 200,
+      // but keep as safety net for network errors / 401 auth failures
+      if (error) {
+        console.error('[Pause] invoke error:', error);
+        Alert.alert('Error', 'Network error. Please check your connection and try again.');
+        return;
+      }
+
+      // SUCCESS
+      if (data.success) {
+        Alert.alert(
+          t('adPaused') || 'Ad Paused',
+          t('adPausedSuccess') || 'Your ad has been paused successfully.',
+        );
+        setShowPauseSuccessCard(true);
+        fetchCampaign(true);
+        return;
+      }
+
+      // BUSINESS ERROR — data.success === false
+      // The edge function returns { success: false, error: "CODE", message: "..." }
+      console.log('[Pause] Business error:', data.error, data.message);
+
+      switch (data.error) {
+        case 'NO_PERMISSION':
+          Alert.alert(
+            t('noPermission') || 'No Permission',
+            t('noPermissionPause') || 'You do not have permission to pause ads.',
+          );
+          break;
+
+        case 'INSUFFICIENT_SPEND':
+          Alert.alert(
+            t('cannotPause') || 'Cannot Pause',
+            data.message || `Ad must spend at least $5 before pausing. Current: $${campaign?.spend?.toFixed(2)}`,
+          );
+          break;
+
+        case 'DAILY_LIMIT_REACHED':
+          Alert.alert(
+            t('dailyLimit') || 'Daily Limit',
+            data.message || `You've used all ${data.daily_limit} pauses today. Try again tomorrow.`,
+          );
+          break;
+
+        case 'ALREADY_PAUSED':
+          Alert.alert(
+            t('alreadyPaused') || 'Already Paused',
+            t('alreadyPausedMsg') || 'This ad has already been paused.',
+          );
+          break;
+
+        case 'INVALID_STATUS':
+          Alert.alert(
+            t('cannotPause') || 'Cannot Pause',
+            t('onlyActivePause') || 'Only active ads can be paused.',
+          );
+          break;
+
+        case 'TIKTOK_API_ERROR':
+          Alert.alert(
+            t('pauseFailed') || 'Pause Failed',
+            t('pauseFailedTiktok') || 'Failed to pause ad on TikTok. Please try again later.',
+          );
+          break;
+
+        case 'NO_ADVERTISER':
+        case 'NO_ADGROUP':
+        case 'NO_TOKEN':
+        case 'DB_UPDATE_ERROR':
+          Alert.alert(
+            t('error') || 'Error',
+            t('pauseContactSupport') || 'Unable to pause this ad. Please contact support.',
+          );
+          break;
+
+        default:
+          Alert.alert(
+            t('error') || 'Error',
+            data.message || t('somethingWrong') || 'Something went wrong.',
+          );
+      }
+    } catch (err) {
+      console.error('[Pause] Unexpected error:', err);
+      Alert.alert('Error', 'An unexpected error occurred. Please try again.');
+    } finally {
+      setIsPausing(false);
     }
-    if (spend < 5) {
-      Alert.alert(t('cannotPause') || 'Cannot Pause', (t('pauseMinSpend') || 'Ad must spend at least $5 before pausing. Current: $') + spend.toFixed(2));
-      return;
-    }
-    if (pauseLocked || isPausedByUser) {
-      Alert.alert(t('alreadyPaused') || 'Already Paused', t('adAlreadyPaused') || 'This ad has already been paused.');
-      return;
-    }
-    if (status !== 'active' && status !== 'running') {
-      Alert.alert(t('cannotPause') || 'Cannot Pause', t('onlyActiveCanPause') || 'Only active ads can be paused.');
+  };
+
+  const showPauseConfirmation = async () => {
+    if (!campaign || !user?.id) return;
+    // Fetch today's pause usage
+    const today = new Date().toISOString().split('T')[0];
+    const { data: todayPauses } = await supabase
+      .from('user_pause_limits')
+      .select('pause_count')
+      .eq('user_id', user.id)
+      .eq('pause_date', today)
+      .maybeSingle();
+
+    const dailyLimit = pauseProfile?.daily_pause_limit || 1;
+    const used = todayPauses?.pause_count || 0;
+    const remaining = dailyLimit - used;
+
+    if (remaining <= 0) {
+      Alert.alert(
+        t('dailyLimit') || 'Daily Limit Reached',
+        t('dailyLimitMsg') || `You've used all ${dailyLimit} pauses today. Try again tomorrow.`,
+      );
       return;
     }
 
-    const remaining = pauseLimitInfo?.remaining ?? 1;
-    const limit = pauseLimitInfo?.daily_limit ?? 1;
-    const confirmMsg = remaining <= 0
-      ? (t('dailyLimitPauses') || "You've used all pauses today.")
-      : (t('pauseConfirmRemaining', { remaining: String(remaining), limit: String(limit) }) || `You have ${remaining}/${limit} pauses remaining today. Pause this ad?`);
     Alert.alert(
       t('pauseAd') || 'Pause Ad',
-      confirmMsg,
+      `${t('pauseConfirm') || 'Are you sure you want to pause this ad? This action cannot be undone.'}\n\n${t('remainingPauses') || 'Remaining pauses today'}: ${remaining}/${dailyLimit}`,
       [
         { text: t('cancel') || 'Cancel', style: 'cancel' },
         {
-          text: t('pauseAd') || 'Pause',
-          onPress: async () => {
-            try {
-              const { data, error } = await supabase.functions.invoke('user-pause-ad', {
-                body: { campaign_id: campaign.id },
-              });
-              if (error) {
-                Alert.alert(t('error') || 'Error', error.message);
-                return;
-              }
-              if (data?.success) {
-                setShowPauseSuccessCard(true);
-                toast.info(t('adPaused') || 'Ad Paused', t('adPausedMessage') || 'Your ad has been paused successfully.');
-                fetchCampaign();
-                return;
-              }
-              switch (data?.error) {
-                case 'NO_PERMISSION':
-                  Alert.alert(t('noPermission') || 'No Permission', t('noPermissionPause') || 'You do not have permission to pause ads.');
-                  break;
-                case 'INSUFFICIENT_SPEND':
-                  Alert.alert(t('cannotPause') || 'Cannot Pause', (t('pauseMinSpend') || 'Ad must spend at least $5 before pausing. Current: $') + spend.toFixed(2));
-                  break;
-                case 'DAILY_LIMIT_REACHED':
-                  Alert.alert(t('dailyLimit') || 'Daily Limit', data.message || (t('dailyLimitPauses') || "You've used all pauses today."));
-                  break;
-                case 'ALREADY_PAUSED':
-                  Alert.alert(t('alreadyPaused') || 'Already Paused', t('adAlreadyPaused') || 'This ad has already been paused.');
-                  break;
-                case 'INVALID_STATUS':
-                  Alert.alert(t('cannotPause') || 'Cannot Pause', t('onlyActiveCanPause') || 'Only active ads can be paused.');
-                  break;
-                default:
-                  Alert.alert(t('error') || 'Error', data?.message || (t('failedToPause') || 'Failed to pause ad.'));
-              }
-              fetchCampaign();
-            } catch (err: any) {
-              fetchCampaign();
-              toast.error(t('failedToPause') || 'Failed to pause ad', err?.message || 'Please try again');
-            }
-          },
+          text: t('pauseNow') || 'Pause Now',
+          style: 'destructive',
+          onPress: () => handlePause(),
         },
-      ]
+      ],
     );
   };
+
+  // Guard: no id from route params — avoid rendering content that may trigger layout/containerHeight crashes
+  if (!id) {
+    return (
+      <View style={[styles.container, styles.loadingContainer, { paddingTop: insets.top }]}>
+        <Text style={[styles.errorText, isRTL && styles.textRTL]}>{t('campaignNotFound')}</Text>
+        <TouchableOpacity style={styles.button} onPress={() => navigation.goBack()}>
+          <Text style={[styles.buttonText, isRTL && styles.textRTL]}>{t('goToCampaigns')}</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   if (!campaign) {
     if (loading) {
       return (
         <View style={[styles.loadingContainer, { paddingTop: insets.top }]}>
-          <Text style={[styles.errorText, isRTL && styles.textRTL]}>{t('loading') || 'Loading...'}</Text>
+          <Text style={[styles.errorText, isRTL && styles.textRTL]}>{t('loading')}</Text>
         </View>
       );
     }
@@ -524,9 +715,21 @@ export function CampaignDetail() {
       <View style={[styles.errorContainer, { paddingTop: insets.top }]}>
         <Text style={[styles.errorText, isRTL && styles.textRTL]}>{t('campaignNotFound')}</Text>
         <TouchableOpacity
-          style={[styles.button, isRTL && styles.rowReverse]}
+          style={styles.button}
           onPress={() => navigation.goBack()}
         >
+          <Text style={[styles.buttonText, isRTL && styles.textRTL]}>{t('goToCampaigns')}</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // Deleted externally — never show detail, treat as not found
+  if ((campaign.status || '').toLowerCase() === 'deleted_external') {
+    return (
+      <View style={[styles.errorContainer, { paddingTop: insets.top }]}>
+        <Text style={[styles.errorText, isRTL && styles.textRTL]}>{t('campaignNotFound')}</Text>
+        <TouchableOpacity style={styles.button} onPress={() => navigation.goBack()}>
           <Text style={[styles.buttonText, isRTL && styles.textRTL]}>{t('goToCampaigns')}</Text>
         </TouchableOpacity>
       </View>
@@ -557,16 +760,8 @@ export function CampaignDetail() {
     ? new Date(new Date(campaign.started_at).getTime() + campaign.duration_days * 24 * 60 * 60 * 1000)
     : new Date(new Date(campaign.created_at).getTime() + campaign.duration_days * 24 * 60 * 60 * 1000);
 
-  // Format dates
-  const formatDate = (date: Date) => {
-    return date.toLocaleDateString('en-GB', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
+  // Format dates (numeric, no English month names)
+  const formatDate = (date: Date) => formatDateTimeNumeric(date);
 
   // Show progress tracker for campaigns in workflow (not active/completed/rejected)
   const showProgressTracker = !['active', 'completed', 'paused', 'rejected', 'failed'].includes(campaign.status);
@@ -575,12 +770,12 @@ export function CampaignDetail() {
   // Step 0 (Review) → waiting_for_admin
   // Step 1 (Payment) → awaiting_payment, verifying_payment
   // Step 2 (Launch) → pending
-  // Step 3 (Complete) → active, completed
+  // Step 3 (Complete) → active, completed, paused
   const getProgressStep = () => {
     if (campaign.status === 'waiting_for_admin') return 0; // Review step
     if (campaign.status === 'awaiting_payment' || campaign.status === 'verifying_payment') return 1; // Payment step
     if (campaign.status === 'pending') return 2; // Launch step
-    if (campaign.status === 'active' || campaign.status === 'completed') return 3; // Complete
+    if (campaign.status === 'active' || campaign.status === 'completed' || campaign.status === 'paused') return 3; // Complete
     return 0;
   };
 
@@ -588,7 +783,7 @@ export function CampaignDetail() {
   const ageRange = campaign.target_age_min && campaign.target_age_max
     ? `${campaign.target_age_min}-${campaign.target_age_max}`
     : '18-65';
-  const gender = campaign.target_gender === 'all' ? 'All' : campaign.target_gender || 'All';
+  const gender = campaign.target_gender === 'all' ? t('all') : campaign.target_gender || t('all');
 
   const formatNumber = (num: number): string => {
     if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
@@ -600,21 +795,12 @@ export function CampaignDetail() {
     return formatNumber(value);
   };
 
-  // Format date for display (DD-MM-YYYY)
-  const formatDateShort = (date: Date) => {
-    return date.toLocaleDateString('en-GB', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-    });
-  };
+  // Format date for display (DD/MM/YYYY)
+  const formatDateShort = (date: Date) => formatDateNumericDMY(date);
 
-  // Get objective display name
-  const getObjectiveDisplayName = () => {
-    if (isViewsObjective) return 'Video Views';
-    if (isConversionsObjective) return 'Contacts & Messages';
-    return campaign.objective;
-  };
+  // Get objective display name (translated)
+  const getObjectiveDisplayName = () =>
+    translateObjective(campaign.objective, language as 'ckb' | 'ar');
 
   // Get audience display name
   const getAudienceDisplayName = () => {
@@ -624,8 +810,69 @@ export function CampaignDetail() {
     return t('all');
   };
 
-  // Get budget (use real_budget if available, otherwise total_budget)
-  const displayBudget = campaign.real_budget || campaign.total_budget;
+  const displayBudget = getDisplayBudget(campaign);
+
+  // Wallet payment: base + tax in USD, then convert to IQD using dynamic exchange rate.
+  const baseBudgetUsd = displayBudget;
+  const baseTaxUsd = calculateTax(baseBudgetUsd);
+  const walletTotalUsd = baseBudgetUsd + baseTaxUsd;
+  const walletTotalIqd = convertToIQD(walletTotalUsd);
+
+  const payWithBalanceLabel = language === 'ckb' ? 'پارەدان لە باڵانس' : 'الدفع من الرصيد';
+  const orPayDirectlyLabel = language === 'ckb' ? 'یان ڕاستەوخۆ پارە بدە' : 'أو ادفع مباشرة';
+  const insufficientLabel = language === 'ckb' ? 'باڵانس بەس نییە' : 'الرصيد غير كافٍ';
+  const addFundsLabel = language === 'ckb' ? 'زیادکردنی باڵانس' : 'إضافة رصيد';
+  const closeLabel = language === 'ckb' ? 'داخستن' : 'إغلاق';
+
+  const handlePayWithBalance = useCallback(async () => {
+    if (!user || !campaign) return;
+    // Wallet must cover base budget + tax (walletTotalUsd), while DB/API keep base-only USD.
+    const costUsd = walletTotalUsd;
+    if (walletBalance < costUsd) {
+      Alert.alert(
+        insufficientLabel,
+        language === 'ckb'
+          ? `${formatIQD(walletTotalIqd)} پێویستە بەڵام ${formatIQD(convertToIQD(walletBalance))} هەیە`
+          : `تحتاج ${formatIQD(walletTotalIqd)} لكن لديك ${formatIQD(convertToIQD(walletBalance))}`,
+        [
+          { text: addFundsLabel, onPress: () => (navigation as any).navigate('ProfileStack', { screen: 'AddBalance' }) },
+          { text: closeLabel, style: 'cancel' },
+        ]
+      );
+      return;
+    }
+    const newBalanceUsd = walletBalance - costUsd;
+    const costIqd = walletTotalIqd;
+    try {
+      await supabase.from('profiles').update({ wallet_balance: newBalanceUsd }).eq('user_id', user.id);
+      await supabase
+        .from('campaigns')
+        .update({
+          status: 'verifying_payment',
+          payment_method_used: 'wallet_balance',
+          payment_amount_iqd: String(costIqd),
+          payment_transaction_id: `WALLET-${Date.now()}`,
+        })
+        .eq('id', campaign.id);
+      await supabase.from('transactions').insert({
+        user_id: user.id,
+        campaign_id: campaign.id,
+        type: 'payment',
+        // Store BASE ONLY in transactions.amount (tax is platform revenue).
+        amount: -(campaign.total_budget ?? baseBudgetUsd),
+        status: 'completed',
+        payment_method: 'wallet_balance',
+        description: language === 'ckb' ? `پارەدانی کامپەین: ${campaign.title}` : `دفع الحملة: ${campaign.title}`,
+      });
+      toast.success(language === 'ckb' ? 'سەرکەوتوو' : 'تم', language === 'ckb' ? 'پارەدان تەواو بوو' : 'تم الدفع');
+      setWalletBalance(newBalanceUsd);
+      fetchCampaign(true);
+    } catch (e: any) {
+      console.error(e);
+      const msg = getErrorMessageForUser(e, null, hasAdminAccess, language === 'ar' ? 'ar' : 'ckb');
+      Alert.alert(hasAdminAccess ? 'Error' : (language === 'ckb' ? 'هەڵە' : 'خطأ'), msg);
+    }
+  }, [user, campaign, walletBalance, language, navigation, fetchCampaign, hasAdminAccess]);
 
   // Calculate start and end dates
   // Use real_end_date (selected date from app) if available, otherwise completed_at, otherwise calculate
@@ -656,30 +903,94 @@ export function CampaignDetail() {
         style={[styles.scrollView, { flex: 1 }]}
         contentContainerStyle={{ paddingBottom: insets.bottom + spacing.xl }}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={false}
+            onRefresh={handleRefresh}
+            tintColor="transparent"
+            colors={['transparent']}
+            progressViewOffset={-1000}
+            style={{ opacity: 0 }}
+          />
+        }
       >
         <View style={{ paddingHorizontal: 16, width: '100%' }}>
         {/* Last Updated - Red, Centered */}
         {lastUpdated && (
           <View style={styles.lastUpdatedContainer}>
             <Text style={styles.lastUpdatedText}>
-              {t('lastUpdated') || 'Last updated'}: {lastUpdated.toLocaleTimeString('en-US', {
-                hour: 'numeric',
-                minute: '2-digit',
-                second: '2-digit',
-                hour12: true,
-              })}
+              {t('lastUpdated')}: {formatTime24(lastUpdated)}
             </Text>
           </View>
         )}
 
-        {isAwaitingPayment ? (
+        {/* Extension status banner */}
+        {!isPaymentsHidden && (() => {
+          const ext = getExtensionStatusText(campaign.extension_status ?? null, (language as 'ckb' | 'ar') || 'ckb');
+          if (!ext) return null;
+          return (
+            <View style={[styles.extensionStatusBanner, ext.color === 'warning' ? styles.extensionStatusBannerWarning : styles.extensionStatusBannerInfo]}>
+              <Text style={ext.color === 'warning' ? styles.extensionStatusBannerTextWarning : styles.extensionStatusBannerTextInfo}>
+                {ext.text}
+              </Text>
+            </View>
+          );
+        })()}
+
+        {isAwaitingPayment && !isPaymentsHidden ? (
           <View style={styles.paymentOnlyContainer}>
-            <View style={[styles.paymentOnlyCard, isRTL && styles.paymentOnlyCardRTL]}>
+            <View style={styles.paymentOnlyCard}>
               <Text style={[styles.paymentOnlyTitle, isRTL && styles.textRTL]}>{t('awaitingPayment')}</Text>
               <Text style={[styles.paymentOnlySubtitle, isRTL && styles.textRTL]}>
                 {t('paymentRequired')} — {t('howToPay')}
               </Text>
             </View>
+
+            {/* Pay with Account Balance - Option A */}
+            <View style={styles.payWithBalanceCard}>
+              <Text style={[styles.payWithBalanceTitle, isRTL && styles.textRTL]}>
+                {language === 'ckb' ? 'باڵانسی جزدان' : 'الرصيد'}: {formatIQD(convertToIQD(walletBalance))}
+              </Text>
+              {walletBalance >= walletTotalUsd ? (
+                <>
+                  <TouchableOpacity
+                    style={styles.payWithBalanceButton}
+                    onPress={handlePayWithBalance}
+                    activeOpacity={0.8}
+                  >
+                    <LinearGradient
+                      colors={['#7C3AED', '#6D28D9']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={styles.payWithBalanceButtonGradient}
+                    >
+                      <Text style={styles.payWithBalanceButtonText}>
+                        {payWithBalanceLabel} ({formatIQD(walletTotalIqd)})
+                      </Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <>
+                  <TouchableOpacity style={[styles.payWithBalanceButton, styles.payWithBalanceButtonDisabled]} disabled>
+                    <Text style={styles.payWithBalanceButtonTextDisabled}>{insufficientLabel}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.addFundsLink}
+                    onPress={() => (navigation as any).navigate('ProfileStack', { screen: 'AddBalance' })}
+                  >
+                    <Text style={styles.addFundsLinkText}>{addFundsLabel}</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+
+            <View style={styles.orDivider}>
+              <View style={styles.orDividerLine} />
+              <Text style={[styles.orDividerText, isRTL && styles.textRTL]}>{orPayDirectlyLabel}</Text>
+              <View style={styles.orDividerLine} />
+            </View>
+
             <TransactionIdInput
               campaignId={campaign.id}
               onSuccess={fetchCampaign}
@@ -695,7 +1006,7 @@ export function CampaignDetail() {
                 <Clock size={20} color={progressStep >= 0 ? '#7C3AED' : '#CBD5E1'} />
               </View>
               <Text style={[styles.progressLabel, progressStep >= 0 && styles.progressLabelActive]}>
-                Review
+                {t('review') || 'Review'}
               </Text>
             </View>
             <View style={styles.progressLine} />
@@ -704,7 +1015,7 @@ export function CampaignDetail() {
                 <CreditCard size={20} color={progressStep >= 1 ? '#7C3AED' : '#CBD5E1'} />
               </View>
               <Text style={[styles.progressLabel, progressStep >= 1 && styles.progressLabelActive]}>
-                Payment
+                {t('payment') || 'Payment'}
               </Text>
             </View>
             <View style={styles.progressLine} />
@@ -729,94 +1040,118 @@ export function CampaignDetail() {
               <Text style={styles.objectiveType}>{getObjectiveDisplayName()}</Text>
             </View>
           </View>
-          {hasVideoLink && (
+          {!isPaymentsHidden && hasVideoLink && (
             <TouchableOpacity
               style={styles.videoButton}
               onPress={handleViewVideo}
               activeOpacity={0.7}
             >
               <Play size={16} color="#7C3AED" />
-              <Text style={styles.videoButtonText}>{t('viewVideo') || 'View Video'}</Text>
+              <Text style={styles.videoButtonText}>{t('viewVideo')}</Text>
+            </TouchableOpacity>
+          )}
+          {campaign.status === 'rejected' && !!campaign.tiktok_rejection_reason && (
+            <View style={styles.rejectionReasonCard}>
+              <Text style={styles.rejectionReasonLabel}>{t('rejected') || 'Rejected'}</Text>
+              <Text style={styles.rejectionReasonText}>{campaign.tiktok_rejection_reason}</Text>
+            </View>
+          )}
+
+          {/* Metrics */}
+          <View style={styles.metricsRow}>
+            {isPaymentsHidden ? (
+              <>
+                <View style={styles.metricCard}>
+                  <Text style={styles.metricValue}>{formatShortNumber(campaign.views || 0)}</Text>
+                  <Text style={styles.metricLabel}>{t('totalViews')}</Text>
+                </View>
+                <View style={styles.metricCard}>
+                  <Text style={styles.metricValue}>{formatShortNumber(campaign.clicks || 0)}</Text>
+                  <Text style={styles.metricLabel}>{t('clicks')}</Text>
+                </View>
+                <View style={styles.metricCard}>
+                  <Text style={styles.metricValue}>{formatShortNumber(campaign.leads || 0)}</Text>
+                  <Text style={styles.metricLabel}>{t('leads') || t('conversions')}</Text>
+                </View>
+              </>
+            ) : (
+              <>
+                <View style={styles.metricCard}>
+                  <Text style={styles.metricValue}>${(campaign.spend || 0).toFixed(2)}</Text>
+                  <Text style={styles.metricLabel}>{t('spent')}</Text>
+                </View>
+                <View style={styles.metricCard}>
+                  <Text style={styles.metricValue}>
+                    {isViewsObjective 
+                      ? `$${cpm.toFixed(2)}`
+                      : formatShortNumber(campaign.leads || 0)
+                    }
+                  </Text>
+                  <Text style={styles.metricLabel}>
+                    {isViewsObjective ? t('costPer1kImpressions') : t('conversions')}
+                  </Text>
+                </View>
+                <View style={styles.metricCard}>
+                  <Text style={styles.metricValue}>{formatShortNumber(campaign.views || 0)}</Text>
+                  <Text style={styles.metricLabel}>{t('totalViews')}</Text>
+                </View>
+              </>
+            )}
+          </View>
+
+          {!isPaymentsHidden && (
+            <View style={styles.costCard}>
+              <View style={styles.costIconContainer}>
+                <DollarSign size={20} color={colors.primary.DEFAULT} />
+              </View>
+              <View style={styles.costTextContainer}>
+                <Text style={styles.costLabel}>
+                  {isViewsObjective ? t('costPer1kImpressions') : t('costPerConversion')}
+                </Text>
+                <Text style={styles.costValue}>
+                  ${isViewsObjective ? cpm.toFixed(2) : costPerConversion.toFixed(2)}
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {/* Summary Text */}
+          {!isPaymentsHidden && (
+            <View style={styles.summaryTextContainer}>
+              <Text style={styles.summaryText}>
+                ${displayBudget.toFixed(2)} {t('totalBudget')} • {campaign.duration_days} {campaign.duration_days === 1 ? t('day') : t('days')}
+              </Text>
+              <Text style={styles.summaryText}>
+                📅 {t('created')}: {formatDateShort(new Date(campaign.created_at))}
+              </Text>
+            </View>
+          )}
+
+          {/* Toggle Button for Details */}
+          {!isPaymentsHidden && (
+            <TouchableOpacity
+              style={[styles.toggleButton, detailsExpanded && styles.toggleButtonExpanded]}
+              onPress={() => setDetailsExpanded(!detailsExpanded)}
+              activeOpacity={0.8}
+            >
+              <View style={styles.toggleLeft}>
+                <View style={[styles.toggleIconContainer, detailsExpanded && styles.toggleIconExpanded]}>
+                  <Eye size={20} color={detailsExpanded ? colors.foreground.DEFAULT : colors.foreground.muted} />
+                </View>
+                <Text style={[styles.toggleText, detailsExpanded && styles.toggleTextExpanded]}>
+                  {t('viewDetailsAndGoals')}
+                </Text>
+              </View>
+              {detailsExpanded ? (
+                <ChevronUp size={20} color={colors.primary.DEFAULT} />
+              ) : (
+                <ChevronDown size={20} color={colors.foreground.muted} />
+              )}
             </TouchableOpacity>
           )}
 
-          {/* 3 Metric Cards Row */}
-          <View style={styles.metricsRow}>
-            <View style={styles.metricCard}>
-              <Text style={styles.metricValue}>${(campaign.spend || 0).toFixed(2)}</Text>
-              <Text style={styles.metricLabel}>{t('spent') || 'Spent'}</Text>
-            </View>
-            <View style={styles.metricCard}>
-              <Text style={styles.metricValue}>
-                {isViewsObjective 
-                  ? `$${cpm.toFixed(2)}`
-                  : formatShortNumber(campaign.leads || 0)
-                }
-              </Text>
-              <Text style={styles.metricLabel}>
-                {isViewsObjective 
-                  ? t('costPer1kImpressions') || 'CPM'
-                  : t('conversions') || 'Conversions'
-                }
-              </Text>
-            </View>
-            <View style={styles.metricCard}>
-              <Text style={styles.metricValue}>{formatShortNumber(campaign.views || 0)}</Text>
-              <Text style={styles.metricLabel}>{t('totalViews') || 'Views'}</Text>
-            </View>
-          </View>
-
-          {/* Cost Highlight Card */}
-          <View style={styles.costCard}>
-            <View style={styles.costIconContainer}>
-              <DollarSign size={20} color={colors.primary.DEFAULT} />
-            </View>
-            <View style={styles.costTextContainer}>
-              <Text style={styles.costLabel}>
-                {isViewsObjective 
-                  ? t('costPer1kImpressions') || 'Cost / 1K Views'
-                  : t('costPerConversion') || 'Cost / Conversion'
-                }
-              </Text>
-              <Text style={styles.costValue}>
-                ${isViewsObjective ? cpm.toFixed(2) : costPerConversion.toFixed(2)}
-              </Text>
-            </View>
-          </View>
-
-          {/* Summary Text */}
-          <View style={styles.summaryTextContainer}>
-            <Text style={styles.summaryText}>
-              ${displayBudget.toFixed(2)} {t('totalBudget') || 'Total Budget'} • {campaign.duration_days} {campaign.duration_days === 1 ? t('day') || 'day' : t('days') || 'days'}
-            </Text>
-            <Text style={styles.summaryText}>
-              📅 {t('created') || 'Created'}: {formatDateShort(new Date(campaign.created_at))}
-            </Text>
-          </View>
-
-          {/* Toggle Button for Details */}
-          <TouchableOpacity
-            style={[styles.toggleButton, detailsExpanded && styles.toggleButtonExpanded]}
-            onPress={() => setDetailsExpanded(!detailsExpanded)}
-            activeOpacity={0.8}
-          >
-            <View style={styles.toggleLeft}>
-              <View style={[styles.toggleIconContainer, detailsExpanded && styles.toggleIconExpanded]}>
-                <Eye size={20} color={detailsExpanded ? colors.foreground.DEFAULT : colors.foreground.muted} />
-              </View>
-              <Text style={[styles.toggleText, detailsExpanded && styles.toggleTextExpanded]}>
-                {t('viewDetailsAndGoals') || 'View Details & Goals'}
-              </Text>
-            </View>
-            {detailsExpanded ? (
-              <ChevronUp size={20} color={colors.primary.DEFAULT} />
-            ) : (
-              <ChevronDown size={20} color={colors.foreground.muted} />
-            )}
-          </TouchableOpacity>
-
           {/* Expanded Details */}
-          {detailsExpanded && (
+          {!isPaymentsHidden && detailsExpanded && (
             <View style={styles.detailsContainer}>
               {/* Objective Card (Highlighted) */}
               <View style={[styles.detailCard, styles.detailCardHighlighted]}>
@@ -824,7 +1159,7 @@ export function CampaignDetail() {
                   <Target size={20} color={colors.primary.DEFAULT} />
                 </View>
                 <View style={styles.detailContent}>
-                  <Text style={styles.detailLabel}>{t('objective') || 'Objective'}</Text>
+                  <Text style={styles.detailLabel}>{t('objective')}</Text>
                   <Text style={styles.detailValue}>{getObjectiveDisplayName()}</Text>
                 </View>
               </View>
@@ -835,21 +1170,22 @@ export function CampaignDetail() {
                   <Users size={20} color={colors.foreground.muted} />
                 </View>
                 <View style={styles.detailContent}>
-                  <Text style={styles.detailLabel}>{t('targetAudience') || 'Target Audience'}</Text>
+                  <Text style={styles.detailLabel}>{t('targetAudience')}</Text>
                   <Text style={styles.detailValue}>{getAudienceDisplayName()}</Text>
                 </View>
               </View>
 
-              {/* Budget Card */}
-              <View style={styles.detailCard}>
-                <View style={styles.detailIconContainer}>
-                  <DollarSign size={20} color={colors.foreground.muted} />
+              {!isPaymentsHidden && (
+                <View style={styles.detailCard}>
+                  <View style={styles.detailIconContainer}>
+                    <DollarSign size={20} color={colors.foreground.muted} />
+                  </View>
+                  <View style={styles.detailContent}>
+                    <Text style={styles.detailLabel}>{t('budget')}</Text>
+                    <Text style={styles.detailValue}>${displayBudget.toFixed(2)}</Text>
+                  </View>
                 </View>
-                <View style={styles.detailContent}>
-                  <Text style={styles.detailLabel}>{t('budget') || 'Budget'}</Text>
-                  <Text style={styles.detailValue}>${displayBudget.toFixed(2)}</Text>
-                </View>
-              </View>
+              )}
 
               {/* Age Range Card */}
               <View style={styles.detailCard}>
@@ -857,7 +1193,7 @@ export function CampaignDetail() {
                   <Users size={20} color={colors.foreground.muted} />
                 </View>
                 <View style={styles.detailContent}>
-                  <Text style={styles.detailLabel}>{t('ageRange') || 'Age Range'}</Text>
+                  <Text style={styles.detailLabel}>{t('ageRange')}</Text>
                   <Text style={styles.detailValue}>{ageRange}</Text>
                 </View>
               </View>
@@ -868,7 +1204,7 @@ export function CampaignDetail() {
                   <Users size={20} color={colors.foreground.muted} />
                 </View>
                 <View style={styles.detailContent}>
-                  <Text style={styles.detailLabel}>{t('gender') || 'Gender'}</Text>
+                  <Text style={styles.detailLabel}>{t('gender')}</Text>
                   <Text style={styles.detailValue}>{gender}</Text>
                 </View>
               </View>
@@ -879,7 +1215,7 @@ export function CampaignDetail() {
                   <Calendar size={20} color={colors.foreground.muted} />
                 </View>
                 <View style={styles.detailContent}>
-                  <Text style={styles.detailLabel}>{t('startDate') || 'Start Date'}</Text>
+                  <Text style={styles.detailLabel}>{t('startDate')}</Text>
                   <Text style={styles.detailValue}>{formatDateShort(startDate)}</Text>
                 </View>
               </View>
@@ -890,7 +1226,7 @@ export function CampaignDetail() {
                   <Calendar size={20} color={colors.foreground.muted} />
                 </View>
                 <View style={styles.detailContent}>
-                  <Text style={styles.detailLabel}>{t('endDate') || 'End Date'}</Text>
+                  <Text style={styles.detailLabel}>{t('endDate')}</Text>
                   <Text style={styles.detailValue}>{formatDateShort(endDate)}</Text>
                 </View>
               </View>
@@ -898,8 +1234,8 @@ export function CampaignDetail() {
           )}
         </View>
 
-        {/* View Invoice Button - Only show for completed campaigns */}
-        {campaign.status === 'completed' && (
+        {/* View Invoice Button - Only show for completed-like campaigns */}
+        {!isPaymentsHidden && ['completed', 'paused'].includes((campaign.status || '').toLowerCase()) && (
           <View style={styles.invoiceButtonContainer}>
             <TouchableOpacity
               style={styles.invoiceButton}
@@ -910,45 +1246,79 @@ export function CampaignDetail() {
             >
               <FileText size={18} color={colors.foreground.DEFAULT} />
               <Text style={styles.invoiceButtonText}>
-                {t('viewInvoice') || 'View Invoice'}
+                {t('viewInvoice')}
               </Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* Extend Button - Show when eligible: 75%+ of budget spent; Pause - after $5 spent */}
+        {/* Pause: after Invoice, before Boost Again. Only when canUserPause && !owner; hide completely when false. */}
         {(() => {
-          const status = (campaign.status || '').toLowerCase();
-          const spentPercentage = campaign.total_budget > 0
-            ? ((campaign.spend || 0) / campaign.total_budget) * 100
-            : 0;
-          const canExtend =
-            (status === 'active' || status === 'running' || status === 'completed' || status === 'paused') &&
-            campaign.daily_budget >= 20 &&
-            !campaign.extension_status &&
-            spentPercentage >= 75;
+          const currentSpend = Number(campaign?.spend ?? 0);
+          const campaignStatus = String(campaign?.status ?? '').toLowerCase();
+          const hasAdGroup = !!String((campaign as any)?.tiktok_adgroup_id ?? '').trim();
+          const dailyBudget = Number(campaign.daily_budget) || 0;
+          const spentPercentage = displayBudget > 0 ? ((campaign.spend || 0) / displayBudget) * 100 : 0;
+          const isExtensionProcessing = campaign.extension_status === 'processing';
+          const isVerifyingPayment = campaign.extension_status === 'verifying_payment';
+          const noPendingExtension = !isExtensionProcessing && !isVerifyingPayment && !campaign.extension_status;
 
-          const canPause =
-            canPauseAds &&
-            (status === 'active' || status === 'running') &&
-            (campaign.spend || 0) >= 5 &&
-            !(campaign as any).pause_locked &&
-            !(campaign as any).is_paused_by_user;
+          const canUserPause =
+            pauseProfile?.can_pause_ads === true &&
+            campaignStatus === 'active' &&
+            hasAdGroup &&
+            currentSpend >= 5.0 &&
+            !(campaign as any)?.pause_locked &&
+            !(campaign as any)?.is_paused_by_user &&
+            !hasAdminAccess;
+          const showPauseButton = canUserPause && !hasAdminAccess;
+
+          if (__DEV__) {
+            console.log('[CampaignDetail] Pause canUserPause inputs', {
+              can_pause_ads: pauseProfile?.can_pause_ads,
+              campaignStatus,
+              hasAdGroup,
+              currentSpend,
+              pause_locked: (campaign as any)?.pause_locked,
+              is_paused_by_user: (campaign as any)?.is_paused_by_user,
+              isOwner: hasAdminAccess,
+              showPauseButton,
+              canUserPause,
+            });
+          }
+
+          const canExtend =
+            canExtendAds &&
+            hasAdGroup &&
+            campaignStatus === 'active' &&
+            spentPercentage >= 75 &&
+            dailyBudget >= 20 &&
+            noPendingExtension;
 
           return (
           <>
-          {canPause && (
+          {showPauseButton && (
             <View style={styles.pauseButtonContainer}>
               <TouchableOpacity
                 style={styles.pauseButton}
                 activeOpacity={0.8}
-                onPress={handlePauseAd}
+                onPress={showPauseConfirmation}
+                disabled={isPausing}
               >
                 <Text style={styles.pauseButtonText}>{t('pauseAd') || 'Pause Ad'}</Text>
               </TouchableOpacity>
             </View>
           )}
-          {canExtend ? (
+          {!isPaymentsHidden && (isExtensionProcessing ? (
+            <View style={styles.extendButtonContainer}>
+              <View style={[styles.extendButton, { opacity: 0.8 }]}>
+                <ActivityIndicator size="small" color={colors.primary.foreground} />
+                <Text style={styles.extendButtonText}>
+                  {language === 'ar' ? 'جاري المعالجة...' : 'لە پرۆسەکردندایە...'}
+                </Text>
+              </View>
+            </View>
+          ) : canExtend ? (
             <View style={styles.extendButtonContainer}>
               <TouchableOpacity
                 style={styles.extendButton}
@@ -961,7 +1331,7 @@ export function CampaignDetail() {
                 </Text>
               </TouchableOpacity>
             </View>
-          ) : null}
+          ) : null)}
           </>
           );
         })()}
@@ -970,7 +1340,7 @@ export function CampaignDetail() {
         {showPauseSuccessCard && (
           <View style={styles.pauseSuccessCard}>
             <Text style={styles.pauseSuccessCardText}>
-              {t('forRefundsOrReactivation') || 'For refunds or to request reactivation, contact support:'}
+              {t('pauseSuccessMsg') || 'For refunds or to request reactivation, contact support:'}
             </Text>
             <TouchableOpacity
               onPress={() => Linking.openURL('https://wa.me/9647504881516')}
@@ -978,14 +1348,14 @@ export function CampaignDetail() {
               activeOpacity={0.8}
             >
               <Text style={styles.pauseSuccessCardButtonText}>
-                {t('contactViaWhatsApp') || 'Contact via WhatsApp'}
+                {t('contactWhatsApp') || 'Contact via WhatsApp'}
               </Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* Boost Again Button - Only show for completed campaigns */}
-        {campaign.status === 'completed' && (
+        {/* Boost Again Button - Only show for completed-like campaigns */}
+        {!isPaymentsHidden && ['completed', 'paused'].includes((campaign.status || '').toLowerCase()) && (
           <View style={styles.boostAgainContainer}>
             <Text style={styles.hintText}>
               {t('repeatSameSponsor') || 'Repeat the same sponsor.'}
@@ -1022,19 +1392,22 @@ export function CampaignDetail() {
           </View>
         )}
 
-        {/* Extension Prompt - Show when eligible (75%+ of budget spent), auto-hide after 30 min */}
+        {/* Extension Prompt - Show when eligible, auto-hide after 1 hour */}
         {(() => {
           const status = (campaign.status || '').toLowerCase();
-          const spentPercentage = campaign.total_budget > 0
-            ? ((campaign.spend || 0) / campaign.total_budget) * 100
-            : 0;
+          const dailyBudget = Number(campaign.daily_budget) || 0;
+          const spentPercentage = displayBudget > 0 ? ((campaign.spend || 0) / displayBudget) * 100 : 0;
+          const noPendingExtension = campaign.extension_status !== 'processing' && campaign.extension_status !== 'verifying_payment' && !campaign.extension_status;
+          const hasTiktokAdGroup = !!(campaign as any).tiktok_adgroup_id;
           const canExtend =
-            (status === 'active' || status === 'running' || status === 'completed' || status === 'paused') &&
-            campaign.daily_budget >= 20 &&
-            !campaign.extension_status &&
-            spentPercentage >= 75;
+            canExtendAds &&
+            hasTiktokAdGroup &&
+            status === 'active' &&
+            spentPercentage >= 75 &&
+            dailyBudget >= 20 &&
+            noPendingExtension;
           
-          return canExtend && extendPromptVisible ? (
+          return !isPaymentsHidden && canExtend && extendPromptVisible ? (
             <View style={styles.extensionPrompt}>
               <View style={styles.extensionPromptHeader}>
                 <Sparkles size={20} color={colors.primary.DEFAULT} />
@@ -1082,19 +1455,15 @@ export function CampaignDetail() {
         {/* Removed duplicate Campaign Details section - details are in collapsible section above */}
 
         {/* Transactions Section */}
-        {transactions.length > 0 && (
+        {!isPaymentsHidden && transactions.length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Transactions</Text>
+            <Text style={styles.sectionTitle}>{t('transactions')}</Text>
             {transactions.map((transaction) => (
               <View key={transaction.id} style={styles.transactionRow}>
                 <View style={styles.transactionInfo}>
                   <Text style={styles.transactionDescription}>{transaction.description}</Text>
                   <Text style={styles.transactionDate}>
-                    {new Date(transaction.created_at).toLocaleDateString('en-US', {
-                      month: 'numeric',
-                      day: 'numeric',
-                      year: 'numeric',
-                    })}
+                    {formatDateNumericDMY(new Date(transaction.created_at))}
                   </Text>
                 </View>
                 <Text style={[styles.transactionAmount, transaction.amount >= 0 ? styles.transactionAmountPositive : styles.transactionAmountNegative]}>
@@ -1107,17 +1476,21 @@ export function CampaignDetail() {
         </View>
       </ScrollView>
 
-      {/* Extend Ad Modal */}
-      {campaign && (
+      {/* Extend Ad Modal - mount only when needed to avoid BottomSheet layout crashes on screen load */}
+      {!isPaymentsHidden && campaign && showExtendModal && (
         <ExtendAdModal
           open={showExtendModal}
           onOpenChange={setShowExtendModal}
           campaignId={campaign.id}
           campaignTitle={campaign.title}
-          dailyBudget={campaign.daily_budget}
+          dailyBudget={Number(campaign.daily_budget) || 20}
+          totalBudget={getDisplayBudget(campaign)}
+          durationDays={campaign.duration_days}
+          realEndDate={campaign.real_end_date ?? undefined}
+          extensionStatus={campaign.extension_status ?? null}
           onSuccess={() => {
             setShowExtendModal(false);
-            fetchCampaign();
+            fetchCampaign(true);
           }}
         />
       )}
@@ -1125,8 +1498,8 @@ export function CampaignDetail() {
   );
 }
 
-// Create styles function that accepts fontFamily and isRTL
-const createStyles = (colors: any, fontFamily: string, isRTL?: boolean) => StyleSheet.create({
+// Create styles function that accepts fontFamily and isRTL (use RN.StyleSheet so it exists at runtime)
+const createStyles = (colors: any, fontFamily: string, isRTL?: boolean) => RN.StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background.DEFAULT,
@@ -1161,12 +1534,6 @@ const createStyles = (colors: any, fontFamily: string, isRTL?: boolean) => Style
     paddingEnd: spacing.md,
     paddingVertical: spacing.md,
     backgroundColor: colors.background.DEFAULT,
-  },
-  headerRTL: {
-    flexDirection: 'row',
-  },
-  rowReverse: {
-    flexDirection: 'row',
   },
   textRTL: {
     textAlign: 'right',
@@ -1226,6 +1593,30 @@ const createStyles = (colors: any, fontFamily: string, isRTL?: boolean) => Style
     color: colors.foreground.muted,
     fontWeight: '500',
     fontFamily, // Use language-specific font
+  },
+  extensionStatusBanner: {
+    borderRadius: borderRadius.DEFAULT,
+    paddingVertical: spacing[3],
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.md,
+  },
+  extensionStatusBannerWarning: {
+    backgroundColor: '#FEF3C7',
+  },
+  extensionStatusBannerInfo: {
+    backgroundColor: '#DBEAFE',
+  },
+  extensionStatusBannerTextWarning: {
+    fontSize: 13,
+    color: '#92400E',
+    fontWeight: '600',
+    fontFamily,
+  },
+  extensionStatusBannerTextInfo: {
+    fontSize: 13,
+    color: '#1E40AF',
+    fontWeight: '600',
+    fontFamily,
   },
   progressContainer: {
     flexDirection: 'row',
@@ -1418,8 +1809,79 @@ const createStyles = (colors: any, fontFamily: string, isRTL?: boolean) => Style
     fontWeight: '500',
     fontFamily,
   },
-  paymentOnlyCardRTL: {
-    alignItems: 'flex-end',
+  payWithBalanceCard: {
+    backgroundColor: colors.card.background,
+    borderRadius: borderRadius.card,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border.DEFAULT,
+    marginBottom: spacing.sm,
+  },
+  payWithBalanceTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.foreground.DEFAULT,
+    marginBottom: 4,
+    fontFamily,
+  },
+  payWithBalanceAvailable: {
+    fontSize: 14,
+    color: colors.foreground.muted,
+    marginBottom: spacing.sm,
+    fontFamily,
+  },
+  payWithBalanceButton: {
+    borderRadius: 999,
+    overflow: 'hidden',
+  },
+  payWithBalanceButtonGradient: {
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  payWithBalanceButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 15,
+    fontFamily: 'Rabar_021',
+  },
+  payWithBalanceButtonDisabled: {
+    backgroundColor: colors.border.DEFAULT,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderRadius: 999,
+  },
+  payWithBalanceButtonTextDisabled: {
+    color: colors.foreground.muted,
+    fontWeight: '600',
+    fontSize: 15,
+    fontFamily: 'Rabar_021',
+  },
+  addFundsLink: {
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  addFundsLinkText: {
+    fontSize: 14,
+    color: colors.primary.DEFAULT,
+    fontWeight: '600',
+    fontFamily,
+  },
+  orDivider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: spacing.sm,
+    gap: spacing.sm,
+  },
+  orDividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: colors.border.DEFAULT,
+  },
+  orDividerText: {
+    fontSize: 12,
+    color: colors.foreground.muted,
+    fontFamily,
   },
   sectionTitle: {
     fontSize: 18,
@@ -1443,6 +1905,8 @@ const createStyles = (colors: any, fontFamily: string, isRTL?: boolean) => Style
     fontSize: 14,
     color: colors.foreground.muted,
     fontWeight: '500',
+    textAlign: isRTL ? 'right' : 'left',
+    writingDirection: isRTL ? 'rtl' : 'ltr',
   },
   detailValue: {
     fontSize: 14,
@@ -1610,7 +2074,7 @@ const createStyles = (colors: any, fontFamily: string, isRTL?: boolean) => Style
     textAlign: 'center',
   },
   playOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...RN.StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: colors.overlay.medium,
@@ -1636,6 +2100,31 @@ const createStyles = (colors: any, fontFamily: string, isRTL?: boolean) => Style
     fontSize: 12,
     color: '#7C3AED',
     fontWeight: '600',
+  },
+  rejectionReasonCard: {
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+    borderColor: 'rgba(239, 68, 68, 0.24)',
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 16,
+  },
+  rejectionReasonLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#DC2626',
+    marginBottom: 6,
+    fontFamily,
+    textAlign: isRTL ? 'right' : 'left',
+    writingDirection: isRTL ? 'rtl' : 'ltr',
+  },
+  rejectionReasonText: {
+    fontSize: 14,
+    lineHeight: 22,
+    color: colors.foreground.DEFAULT,
+    fontFamily,
+    textAlign: isRTL ? 'right' : 'left',
+    writingDirection: isRTL ? 'rtl' : 'ltr',
   },
   campaignName: {
     fontSize: 18,
@@ -1801,13 +2290,15 @@ const createStyles = (colors: any, fontFamily: string, isRTL?: boolean) => Style
     fontSize: 14,
     color: colors.foreground.muted,
     fontFamily, // Use language-specific font
+    textAlign: isRTL ? 'right' : 'left',
+    writingDirection: isRTL ? 'rtl' : 'ltr',
   },
   detailValue: {
     fontSize: 16,
     fontWeight: '700',
     color: colors.foreground.DEFAULT,
     fontFamily, // Use language-specific font
-    textAlign: 'right',
+    textAlign: isRTL ? 'right' : 'left',
   },
   boostAgainContainer: {
     marginTop: 24,

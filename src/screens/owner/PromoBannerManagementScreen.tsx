@@ -9,7 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { spacing, borderRadius } from '@/theme/spacing';
 import { toast } from '@/utils/toast';
 import { Gift } from 'lucide-react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import LinearGradient from 'react-native-linear-gradient';
 import { Text } from '@/components/common/Text';
 import { inputStyleRTL } from '@/utils/rtl';
 
@@ -122,7 +122,6 @@ export function PromoBannerManagementScreen() {
     return settings.display_price_iqd * 3; // 3 days example
   };
 
-  const isRTL = language === 'ckb' || language === 'ar';
   const previewText = language === 'ckb' ? settings.text_ckb : language === 'ar' ? settings.text_ar : settings.text_en;
 
   if (isLoading) {
@@ -253,7 +252,7 @@ export function PromoBannerManagementScreen() {
             end={{ x: 1, y: 0 }}
             style={styles.previewBanner}
           >
-            <View style={[styles.previewContent, isRTL && styles.previewContentRTL]}>
+            <View style={styles.previewContent}>
               <Text style={styles.previewText}>{previewText}</Text>
               <View style={styles.previewPriceContainer}>
                 <Text style={styles.previewPrice}>

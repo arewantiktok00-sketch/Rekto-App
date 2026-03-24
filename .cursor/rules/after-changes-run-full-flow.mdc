@@ -1,0 +1,40 @@
+---
+description: After any code or config changes, run the full clean/install/build/run flow yourself
+alwaysApply: true
+---
+
+# After Changes: Run Full Flow
+
+After making **any** code or config changes to this project, **run the full flow yourself**. Do not only suggest commands; execute them.
+
+## Full flow (in order)
+
+1. **Kill processes**
+   - `killall node` (and if needed: `killall Xcode`, `killall com.apple.dt.SWBBuildService`)
+   - `watchman watch-del-all`
+
+2. **Clean caches and build artifacts**
+   - `rm -rf /tmp/metro-* /tmp/haste-* /tmp/react-*`
+   - `rm -rf node_modules ios/Pods ios/Podfile.lock ios/build`
+   - `rm -rf ~/Library/Developer/Xcode/DerivedData/Rekto-*` (or full DerivedData if needed)
+
+3. **Reinstall**
+   - `npm install` (patch-package will apply patches)
+
+4. **Pods**
+   - `cd ios && pod install --repo-update`
+
+5. **Metro**
+   - Start Metro with cache reset: `npx react-native start --reset-cache` (run in background)
+
+6. **Build & run**
+   - Build: `cd ios && xcodebuild -workspace Rekto.xcworkspace -scheme Rekto -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 16e' -derivedDataPath build build`
+   - Install: `xcrun simctl install booted ios/build/Build/Products/Debug-iphonesimulator/Rekto.app`
+   - Launch: `xcrun simctl launch booted com.Arewan.RektoApp` (bundle ID is **com.Arewan.RektoApp**, not com.rekto.RektoApp)
+
+Alternatively use the project script (with Metro already running): `npm run ios:sim` — it uses device name "iPhone 16e" and bundle ID `com.Arewan.RektoApp`.
+
+## Notes
+
+- Always run this flow after changes; the user expects it.
+- If `react-native run-ios` fails with CocoaPods errors, use manual `pod install` then Xcode or xcodebuild + simctl as above.

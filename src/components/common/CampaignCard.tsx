@@ -1,5 +1,6 @@
 import { Text } from '@/components/common/Text';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useRemoteConfig } from '@/contexts/RemoteConfigContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { supabase } from '@/integrations/supabase/client';
 import { borderRadius, spacing } from '@/theme/spacing';
@@ -7,9 +8,10 @@ import { getMonotonicMetrics } from '@/utils/metricsCache';
 import { isRTL } from '@/utils/rtl';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
-import { AlertCircle, CheckCircle, Clock, DollarSign, Eye, FileText, Megaphone, MessageCircle, Play, Plus } from 'lucide-react-native';
+import { DollarSign, ExternalLink, Eye, FileText, Megaphone, MessageCircle, Play, Plus } from 'lucide-react-native';
 import React, { memo, useEffect, useState } from 'react';
 import { Alert, Image, Linking, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { getDisplayBudget, getExtensionStatusText } from '@/utils/campaignBudget';
 import { CampaignStatusBadge } from './CampaignStatusBadge';
 
 interface Campaign {
@@ -31,8 +33,10 @@ interface Campaign {
   tiktokAdgroupStatus?: string | null;
   tiktokCampaignStatus?: string | null;
   total_budget?: number | null;
+  real_budget?: number | null;
+  target_spend?: number | null;
   daily_budget?: number | null;
-  extension_status?: 'awaiting_payment' | 'verifying_payment' | null;
+  extension_status?: 'awaiting_payment' | 'verifying_payment' | 'processing' | null;
 }
 
 interface CampaignCardProps {
@@ -41,6 +45,7 @@ interface CampaignCardProps {
   onPress?: (campaignId: string) => void;
   onExtendPress?: (campaign: Campaign) => void;
   canPauseAds?: boolean;
+  canExtendAds?: boolean;
   onPausePress?: (campaign: Campaign) => void;
 }
 
@@ -50,13 +55,15 @@ const CampaignCardComponent: React.FC<CampaignCardProps> = ({
   onPress,
   onExtendPress,
   canPauseAds = false,
+  canExtendAds = false,
   onPausePress,
 }) => {
   const navigation = useNavigation();
   const { t, language } = useLanguage();
+  const { isPaymentsHidden } = useRemoteConfig();
   const rtl = isRTL(language);
-  const { colors } = useTheme();
-  const styles = createStyles(colors, rtl);
+  const { colors, isDark } = useTheme();
+  const styles = createStyles(colors, rtl, isDark);
   const [imageError, setImageError] = useState(false);
   const [extendButtonHiddenByTimer, setExtendButtonHiddenByTimer] = useState(false);
   const thumbnailUrl = ((campaign as any).thumbnail_url as string | null) || null;
@@ -66,22 +73,26 @@ const CampaignCardComponent: React.FC<CampaignCardProps> = ({
   const shouldShowImage = isThumbnailValid && !imageError;
 
   const EXTEND_PROMPT_KEY = (cid: string) => `extend_prompt_shown_${cid}`;
-  const EXTEND_PROMPT_MS = 30 * 60 * 1000;
+  const EXTEND_PROMPT_MS = 60 * 60 * 1000;
 
   useEffect(() => {
     setImageError(false);
   }, [thumbnailUrl]);
 
+  const displayBudget = getDisplayBudget(campaign);
   useEffect(() => {
     if (!campaign?.id) return;
     const status = (campaign.status || '').toLowerCase();
-    const totalBudget = (campaign.total_budget ?? 0);
+    const totalBudget = displayBudget;
     const spentPct = totalBudget > 0 ? ((campaign.spend ?? 0) / totalBudget) * 100 : 0;
+    const extStatus = (campaign as any).extension_status;
+    const noPendingExt = extStatus !== 'verifying_payment' && extStatus !== 'processing' && !extStatus;
     const canExtend =
-      (status === 'active' || status === 'running' || status === 'completed' || status === 'paused') &&
+      canExtendAds &&
+      (status === 'active' || status === 'running') &&
+      spentPct >= 75 &&
       (campaign.daily_budget ?? 0) >= 20 &&
-      !(campaign as any).extension_status &&
-      spentPct >= 75;
+      noPendingExt;
     if (!canExtend) {
       setExtendButtonHiddenByTimer(false);
       return;
@@ -98,7 +109,7 @@ const CampaignCardComponent: React.FC<CampaignCardProps> = ({
       setExtendButtonHiddenByTimer(Number.isFinite(stored) && elapsed >= EXTEND_PROMPT_MS);
     });
     return () => { isMounted = false; };
-  }, [campaign?.id, campaign?.status, campaign?.spend, campaign?.total_budget, campaign?.daily_budget, (campaign as any)?.extension_status]);
+  }, [campaign?.id, campaign?.status, campaign?.spend, displayBudget, campaign?.daily_budget, (campaign as any)?.extension_status, (campaign as any)?.completed_at, campaign?.updated_at, campaign?.created_at, canExtendAds]);
 
   const formatNumber = (num: number) => {
     if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
@@ -124,7 +135,8 @@ const CampaignCardComponent: React.FC<CampaignCardProps> = ({
     return format(value);
   };
 
-  const showInvoice = campaign.status === 'completed';
+  const status = (campaign.status || '').toLowerCase();
+  const showInvoice = !isPaymentsHidden && (status === 'completed' || status === 'paused');
 
   const getObjectiveLabel = (objective?: string) => {
     const normalized = objective?.toLowerCase();
@@ -137,16 +149,15 @@ const CampaignCardComponent: React.FC<CampaignCardProps> = ({
   };
 
   const dailyBudget = campaign.daily_budget || 0;
-  const status = (campaign.status || '').toLowerCase();
   const spentPercentage =
-    (campaign.total_budget ?? 0) > 0
-      ? ((campaign.spend ?? 0) / (campaign.total_budget ?? 1)) * 100
-      : 0;
+    displayBudget > 0 ? ((campaign.spend ?? 0) / displayBudget) * 100 : 0;
+  const noPendingExtension = campaign.extension_status !== 'verifying_payment' && campaign.extension_status !== 'processing' && !campaign.extension_status;
   const canExtend =
-    (status === 'active' || status === 'running' || status === 'completed' || status === 'paused') &&
-    dailyBudget >= 20 &&
-    !campaign.extension_status &&
+    canExtendAds &&
+    (status === 'active' || status === 'running') &&
     spentPercentage >= 75 &&
+    dailyBudget >= 20 &&
+    noPendingExtension &&
     !extendButtonHiddenByTimer;
   const canPause =
     canPauseAds &&
@@ -164,6 +175,7 @@ const CampaignCardComponent: React.FC<CampaignCardProps> = ({
   const hasVideoLink =
     (typeof campaign.tiktok_public_url === 'string' && campaign.tiktok_public_url.includes('/@')) ||
     !!campaign.video_url;
+  const showViewVideo = !isPaymentsHidden && ['active', 'completed'].includes(status) && hasVideoLink;
 
   const resolveLegacyVideoUrl = async () => {
     if (!campaign.video_url || !supabase) return null;
@@ -242,9 +254,9 @@ const CampaignCardComponent: React.FC<CampaignCardProps> = ({
               </View>
             )}
             <View style={styles.compactText}>
-              <Text style={styles.compactTitle} numberOfLines={1}>{campaign.title}</Text>
-              <Text style={styles.compactSubtitle}>
-                ${spend.toFixed(0)} {t('spent')}
+              <Text style={[styles.compactTitle, rtl && styles.compactTitleRTL]} numberOfLines={1}>{campaign.title}</Text>
+              <Text style={[styles.compactSubtitle, rtl && styles.compactSubtitleRTL]}>
+                {isPaymentsHidden ? (t(campaign.status) || campaign.status) : `$${spend.toFixed(0)} ${t('spent')}`}
               </Text>
             </View>
           </View>
@@ -259,58 +271,47 @@ const CampaignCardComponent: React.FC<CampaignCardProps> = ({
     );
   }
 
-  const getStatusInfo = () => {
-    const status = campaign.status?.toLowerCase();
-    if (status === 'awaiting_payment' || status === 'verifying_payment') {
-      return { color: '#F59E0B', bg: '#FEF3C7', icon: AlertCircle, text: t('awaitingPayment') || 'Awaiting Payment' };
-    }
-    if (status === 'completed' || status === 'paused') {
-      return { color: '#3B82F6', bg: '#DBEAFE', icon: CheckCircle, text: t('completed') || 'Completed' };
-    }
-    if (status === 'pending' || status === 'waiting_for_admin' || status === 'in_review') {
-      return { color: '#8B5CF6', bg: '#EDE9FE', icon: Clock, text: t('inReview') || 'In Review' };
-    }
-    if (status === 'active' || status === 'running') {
-      return { color: '#10B981', bg: '#D1FAE5', icon: CheckCircle, text: t('active') || 'Active' };
-    }
-    return { color: '#6B7280', bg: '#F3F4F6', icon: AlertCircle, text: status || 'Unknown' };
-  };
-
-  const statusInfo = getStatusInfo();
-  const StatusIcon = statusInfo.icon;
-
   return (
     <View style={styles.card}>
       <TouchableOpacity onPress={handleCardPress} activeOpacity={0.7}>
         <View style={styles.cardHeader}>
-        <View style={styles.cardHeaderLeft}>
-          {/* Thumbnail */}
+          <View style={styles.cardHeaderLeft}>
             {shouldShowImage ? (
-            <View style={styles.thumbnailContainer}>
+              <View style={styles.thumbnailContainer}>
                 <Image
                   source={{ uri: thumbnailUrl as string }}
                   style={styles.thumbnailImage}
                   resizeMode="cover"
                   onError={() => setImageError(true)}
                 />
+                <View style={styles.playOverlay}>
+                  <Play size={16} color="#FFFFFF" />
+                </View>
+              </View>
+            ) : (
+              <View style={styles.thumbnailPlaceholder}>
+                <Megaphone size={28} color="#9CA3AF" />
+              </View>
+            )}
+            <View style={styles.cardHeaderText}>
+              <Text style={[styles.title, rtl && styles.titleRTL]} numberOfLines={1}>{campaign.title}</Text>
+              <Text style={[styles.subtitle, rtl && styles.subtitleRTL]}>{getObjectiveLabel(campaign.objective)}</Text>
             </View>
-          ) : (
-            <View style={styles.thumbnailPlaceholder}>
-              <Megaphone size={28} color="#9CA3AF" />
-            </View>
-          )}
-          <View style={styles.cardHeaderText}>
-            <Text style={styles.title} numberOfLines={1}>{campaign.title}</Text>
-            <Text style={styles.subtitle}>{getObjectiveLabel(campaign.objective)}</Text>
           </View>
+          <CampaignStatusBadge status={campaign.status} />
         </View>
-        <View style={[styles.statusBadge, { backgroundColor: statusInfo.bg }]}>
-          <StatusIcon size={14} color={statusInfo.color} />
-          <Text style={[styles.statusText, { color: statusInfo.color }]}>
-            {statusInfo.text}
-          </Text>
-        </View>
-        </View>
+
+        {(() => {
+          const ext = getExtensionStatusText(campaign.extension_status ?? null, (language as 'ckb' | 'ar') || 'ckb');
+          if (!ext) return null;
+          return (
+            <View style={[styles.extensionStatusChip, ext.color === 'warning' ? styles.extensionStatusWarning : styles.extensionStatusInfo]}>
+              <Text style={ext.color === 'warning' ? styles.extensionStatusTextWarning : styles.extensionStatusTextInfo} numberOfLines={1}>
+                {ext.text}
+              </Text>
+            </View>
+          );
+        })()}
 
         {campaign.tiktokRejectionReason && (
           <View style={styles.rejectionBox}>
@@ -318,60 +319,43 @@ const CampaignCardComponent: React.FC<CampaignCardProps> = ({
           </View>
         )}
 
+        {/* Metrics: icon left, then label + value (original layout) */}
         <View style={styles.metrics}>
-        <View style={styles.metricItem}>
-          <Eye size={16} color="#71717A" />
-          <View style={styles.metricContent}>
-            <Text style={styles.metricLabel} numberOfLines={1}>
-              {t('views')}
-            </Text>
-            <Text style={styles.metricValue}>{renderMetric(views || campaign.impressions)}</Text>
+          <View style={styles.metricItem}>
+            <View style={styles.metricIconBadge}>
+              <Eye size={14} color="#6D28D9" />
+            </View>
+            <View style={styles.metricContent}>
+              <Text style={[styles.metricLabel, rtl && styles.metricLabelRTL]} numberOfLines={1}>{t('viewsDisplay')}</Text>
+              <Text style={[styles.metricValue, { writingDirection: 'ltr', fontFamily: 'Poppins-Bold' }]}>{formatNumber(views)}</Text>
+            </View>
           </View>
-        </View>
-
-        {isConversionCampaign ? (
-          <>
-            <View style={styles.metricItem}>
-              <MessageCircle size={16} color="#71717A" />
-              <View style={styles.metricContent}>
-                <Text style={styles.metricLabel} numberOfLines={1}>
-                  {t('conversions')}
-                </Text>
-                <Text style={styles.metricValue}>{renderMetric(leads)}</Text>
-              </View>
+          <View style={styles.metricItem}>
+            <View style={styles.metricIconBadge}>
+              <MessageCircle size={14} color="#6D28D9" />
             </View>
-            <View style={styles.metricItem}>
-              <DollarSign size={16} color="#71717A" />
-              <View style={styles.metricContent}>
-                <Text style={styles.metricLabel} numberOfLines={1}>
-                  {t('costPerConv') || 'Cost/Conv'}
-                </Text>
-                <Text style={styles.metricValue}>${costPerConversion.toFixed(2)}</Text>
-              </View>
+            <View style={styles.metricContent}>
+              <Text style={[styles.metricLabel, rtl && styles.metricLabelRTL]} numberOfLines={1}>
+                {isPaymentsHidden ? (t('clicks') || 'Clicks') : (isConversionCampaign ? t('conversionsDisplay') : (t('costPer1KLabel') || '1k/ خەرجی بۆ'))}
+              </Text>
+              <Text style={[styles.metricValue, { writingDirection: 'ltr', fontFamily: 'Poppins-Bold' }]}>
+                {isPaymentsHidden ? renderMetric(clicks) : (isConversionCampaign ? renderMetric(leads) : `$${cpm.toFixed(2)}`)}
+              </Text>
             </View>
-          </>
-        ) : (
-          <>
-            <View style={styles.metricItem}>
-              <DollarSign size={16} color="#71717A" />
-              <View style={styles.metricContent}>
-                <Text style={styles.metricLabel} numberOfLines={1}>
-                  {t('costPer1KViews') || 'Cost/1K'}
-                </Text>
-                <Text style={styles.metricValue}>${cpm.toFixed(2)}</Text>
-              </View>
+          </View>
+          <View style={styles.metricItem}>
+            <View style={styles.metricIconBadge}>
+              <MessageCircle size={14} color="#6D28D9" />
             </View>
-            <View style={styles.metricItem}>
-              <DollarSign size={16} color="#71717A" />
-              <View style={styles.metricContent}>
-                <Text style={styles.metricLabel} numberOfLines={1}>
-                  {t('spend')}
-                </Text>
-                <Text style={styles.metricValue}>${spend.toFixed(0)}</Text>
-              </View>
+            <View style={styles.metricContent}>
+              <Text style={[styles.metricLabel, rtl && styles.metricLabelRTL]} numberOfLines={1}>
+                {isPaymentsHidden ? (t('leads') || t('conversionsDisplay')) : (isConversionCampaign ? (t('costPerConvLabel') || 'خەرجی بۆ / 1 نامە') : t('spend'))}
+              </Text>
+              <Text style={[styles.metricValue, { writingDirection: 'ltr', fontFamily: 'Poppins-Bold' }]}>
+                {isPaymentsHidden ? renderMetric(leads) : (isConversionCampaign ? `$${costPerConversion.toFixed(2)}` : `$${spend.toFixed(0)}`)}
+              </Text>
             </View>
-          </>
-        )}
+          </View>
         </View>
       </TouchableOpacity>
 
@@ -385,7 +369,7 @@ const CampaignCardComponent: React.FC<CampaignCardProps> = ({
             <Text style={styles.pauseButtonText}>{t('pauseAd') || 'Pause Ad'}</Text>
           </TouchableOpacity>
         )}
-        {canExtend && (
+        {!isPaymentsHidden && canExtend && (
           <TouchableOpacity
             style={styles.extendButton}
             onPress={() => {
@@ -396,10 +380,10 @@ const CampaignCardComponent: React.FC<CampaignCardProps> = ({
             activeOpacity={0.7}
           >
             <Plus size={16} color={colors.primary.foreground} />
-            <Text style={styles.extendButtonText}>{t('extendAd') || 'Extend'}</Text>
+              <Text style={styles.extendButtonText}>{t('extendAd')}</Text>
           </TouchableOpacity>
         )}
-        {hasVideoLink && (
+        {showViewVideo && (
           <TouchableOpacity
             style={styles.videoButton}
             onPress={() => {
@@ -407,8 +391,8 @@ const CampaignCardComponent: React.FC<CampaignCardProps> = ({
             }}
             activeOpacity={0.7}
           >
-            <Play size={16} color="#7C3AED" />
-            <Text style={styles.videoButtonText}>{t('viewVideo') || 'View Video'}</Text>
+            <ExternalLink size={16} color="#FFFFFF" />
+            <Text style={styles.videoButtonText}>{t('viewVideo')}</Text>
           </TouchableOpacity>
         )}
       {showInvoice && (
@@ -420,7 +404,7 @@ const CampaignCardComponent: React.FC<CampaignCardProps> = ({
           activeOpacity={0.7}
         >
           <FileText size={16} color="#6B7280" />
-          <Text style={styles.invoiceButtonText}>{t('viewInvoice') || 'View Invoice'}</Text>
+          <Text style={styles.invoiceButtonText}>{t('viewInvoiceDisplay')}</Text>
         </TouchableOpacity>
       )}
       </View>
@@ -438,23 +422,26 @@ export const CampaignCard = memo(CampaignCardComponent, (prevProps, nextProps) =
     prevProps.campaign.spend === nextProps.campaign.spend &&
     prevProps.campaign.leads === nextProps.campaign.leads &&
     prevProps.campaign.clicks === nextProps.campaign.clicks &&
+    prevProps.campaign.tiktokRejectionReason === nextProps.campaign.tiktokRejectionReason &&
+    prevProps.campaign.tiktokAdgroupStatus === nextProps.campaign.tiktokAdgroupStatus &&
     (prevProps.campaign as any).thumbnail_url === (nextProps.campaign as any).thumbnail_url &&
     prevProps.compact === nextProps.compact &&
     prevProps.canPauseAds === nextProps.canPauseAds
   );
 });
 
-const createStyles = (colors: any, rtl: boolean) => {
-  const rowDir = 'row';
+const createStyles = (colors: any, _rtl: boolean, isDark: boolean) => {
+  const textPrimary = isDark ? '#FAFAFA' : '#18181B';
+  const textMuted = isDark ? '#A1A1AA' : '#71717A';
   return StyleSheet.create({
   card: {
-    backgroundColor: colors.card.background,
+    backgroundColor: colors.card?.background ?? '#FFFFFF',
     borderRadius: borderRadius.card + 2,
     padding: spacing.md + 4,
     marginBottom: spacing.md,
     marginHorizontal: spacing.md,
     borderWidth: 1,
-    borderColor: '#F3F4F6',
+    borderColor: colors.border?.DEFAULT ?? '#E4E4E7',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
@@ -462,14 +449,14 @@ const createStyles = (colors: any, rtl: boolean) => {
     elevation: 3,
   },
   compactContent: {
-    flexDirection: rowDir,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
   compactLeft: {
     flex: 1,
     marginEnd: 12,
-    flexDirection: rowDir,
+    flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
   },
@@ -479,17 +466,25 @@ const createStyles = (colors: any, rtl: boolean) => {
   compactTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#0A0A0F',
+    color: textPrimary,
     marginBottom: 4,
     fontFamily: 'Poppins-SemiBold',
   },
+  compactTitleRTL: {
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
   compactSubtitle: {
     fontSize: 14,
-    color: '#71717A',
+    color: textMuted,
     fontFamily: 'Poppins-Regular',
   },
+  compactSubtitleRTL: {
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
   cardHeader: {
-    flexDirection: rowDir,
+    flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     marginBottom: spacing.md,
@@ -497,7 +492,7 @@ const createStyles = (colors: any, rtl: boolean) => {
   cardHeaderLeft: {
     flex: 1,
     marginEnd: spacing.md,
-    flexDirection: rowDir,
+    flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
   },
@@ -509,7 +504,9 @@ const createStyles = (colors: any, rtl: boolean) => {
     height: 64,
     borderRadius: 12,
     overflow: 'hidden',
-    backgroundColor: '#F1F5F9',
+    backgroundColor: '#F4F4F5',
+    borderWidth: 1,
+    borderColor: '#E4E4E7',
   },
   thumbnailContainerCompact: {
     width: 48,
@@ -523,11 +520,21 @@ const createStyles = (colors: any, rtl: boolean) => {
     height: '100%',
     resizeMode: 'cover',
   },
+  playOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.2)',
+  },
   thumbnailPlaceholder: {
     width: 64,
     height: 64,
     borderRadius: 12,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: '#EDE9FE',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -552,18 +559,26 @@ const createStyles = (colors: any, rtl: boolean) => {
   title: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#0A0A0F',
+    color: textPrimary,
     marginBottom: 4,
+  },
+  titleRTL: {
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
   subtitle: {
     fontSize: 13,
-    color: '#71717A',
+    color: textMuted,
     textTransform: 'capitalize',
     marginTop: 2,
     fontWeight: '400',
   },
+  subtitleRTL: {
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
   statusBadge: {
-    flexDirection: rowDir,
+    flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 6,
     paddingHorizontal: 10,
@@ -584,8 +599,30 @@ const createStyles = (colors: any, rtl: boolean) => {
     fontSize: 12,
     color: colors.status.rejected.text,
   },
+  extensionStatusChip: {
+    borderRadius: borderRadius.DEFAULT,
+    paddingVertical: spacing[2],
+    paddingHorizontal: spacing[3],
+    marginBottom: spacing[3],
+  },
+  extensionStatusWarning: {
+    backgroundColor: '#FEF3C7',
+  },
+  extensionStatusInfo: {
+    backgroundColor: '#DBEAFE',
+  },
+  extensionStatusTextWarning: {
+    fontSize: 12,
+    color: '#92400E',
+    fontWeight: '500',
+  },
+  extensionStatusTextInfo: {
+    fontSize: 12,
+    color: '#1E40AF',
+    fontWeight: '500',
+  },
   metrics: {
-    flexDirection: rowDir,
+    flexDirection: 'row',
     justifyContent: 'space-between',
     marginTop: spacing.md,
     paddingTop: spacing.md,
@@ -595,26 +632,36 @@ const createStyles = (colors: any, rtl: boolean) => {
   },
   metricItem: {
     flex: 1,
-    flexDirection: rowDir,
+    flexDirection: 'row-reverse',
     alignItems: 'center',
-    gap: spacing.xs + 2,
+    gap: 6,
+  },
+  metricIconBadge: {
+    padding: 6,
+    backgroundColor: '#EDE9FE',
+    borderRadius: 8,
   },
   metricContent: {
     flex: 1,
   },
   metricLabel: {
     fontSize: 11,
-    color: '#71717A',
+    color: textMuted,
     marginBottom: 2,
     fontWeight: '400',
+  },
+  metricLabelRTL: {
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
   metricValue: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#0A0A0F',
+    color: textPrimary,
+    flexShrink: 0,
   },
   actionButtons: {
-    flexDirection: rowDir,
+    flexDirection: 'row',
     gap: spacing.xs + 2,
     marginTop: spacing.md,
   },
@@ -636,12 +683,13 @@ const createStyles = (colors: any, rtl: boolean) => {
   },
   videoButton: {
     flex: 1,
-    flexDirection: rowDir,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    minHeight: 40,
     paddingVertical: spacing.xs + 2,
     paddingHorizontal: spacing.xs,
-    backgroundColor: '#F3E8FF',
+    backgroundColor: '#7C3AED',
     borderRadius: borderRadius.sm,
     gap: spacing.xs,
     borderWidth: 1,
@@ -649,30 +697,31 @@ const createStyles = (colors: any, rtl: boolean) => {
   },
   videoButtonText: {
     fontSize: 11,
-    color: '#7C3AED',
+    color: colors.primary?.foreground ?? '#FFFFFF',
     fontWeight: '600',
   },
   invoiceButton: {
     flex: 1,
-    flexDirection: rowDir,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: spacing.xs + 2,
     paddingHorizontal: spacing.xs,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.background?.secondary ?? '#F3F4F6',
     borderRadius: borderRadius.sm,
     gap: spacing.xs,
   },
   invoiceButtonText: {
     fontSize: 11,
-    color: '#6B7280',
+    color: textMuted,
     fontWeight: '600',
   },
   extendButton: {
     flex: 1,
-    flexDirection: rowDir,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    minHeight: 40,
     paddingVertical: spacing.xs + 2,
     paddingHorizontal: spacing.xs,
     backgroundColor: '#7C3AED',

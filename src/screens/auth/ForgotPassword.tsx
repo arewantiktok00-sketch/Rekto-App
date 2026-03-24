@@ -6,22 +6,24 @@ import { spacing } from '@/theme/spacing';
 import { inputStyleRTL } from '@/utils/rtl';
 import { toast } from '@/utils/toast';
 import { useNavigation } from '@react-navigation/native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Mail, Phone } from 'lucide-react-native';
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { KeyboardAvoidingView, Platform, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export function ForgotPassword() {
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
   const { t } = useLanguage();
   const { colors } = useTheme();
-  const styles = createStyles(colors);
+  const styles = createStyles(colors, insets);
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSendReset = async () => {
     if (!email) {
-      toast.warning('Required', 'Please enter your email');
+      toast.warning(t('required'), t('pleaseEnterEmail'));
       return;
     }
 
@@ -37,20 +39,20 @@ export function ForgotPassword() {
       if (data?.error) {
         // Check if it's a Google account
         if (data.useGoogle) {
-          toast.error('Use Google Sign-In', 'This account uses Google login');
+          toast.error(t('useGoogleSignIn'), t('useGoogleSignIn'));
           return;
         }
         throw new Error(data.error);
       }
 
       // Always show success for security (don't reveal if email exists)
-      toast.success('Code Sent', 'Check your email for the 6-digit code');
+      toast.success(t('codeSent'), t('checkYourEmailForCode'));
       navigation.navigate('Auth', {
         screen: 'ForgotPasswordOTP',
         params: { email: normalizedEmail },
       });
     } catch (error: any) {
-      toast.error('Error', error.message || 'Failed to send verification code');
+      toast.error(t('error'), t('couldNotSendCode'));
     } finally {
       setLoading(false);
     }
@@ -127,7 +129,7 @@ export function ForgotPassword() {
   );
 }
 
-const createStyles = (colors: any) => StyleSheet.create({
+const createStyles = (colors: any, insets: { top: number; bottom: number }) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background.DEFAULT,
@@ -135,7 +137,8 @@ const createStyles = (colors: any) => StyleSheet.create({
   content: {
     flex: 1,
     paddingHorizontal: spacing.screenPadding,
-    paddingTop: spacing[12],
+    paddingTop: insets.top + spacing[6],
+    paddingBottom: insets.bottom + spacing[4],
   },
   iconCircle: {
     width: 56,
@@ -232,7 +235,7 @@ const createStyles = (colors: any) => StyleSheet.create({
   backButton: {
     position: 'absolute',
     start: spacing[4],
-    top: spacing[6],
+    top: insets.top + spacing[2],
     zIndex: 10,
   },
   backButtonText: {

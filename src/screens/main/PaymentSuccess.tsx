@@ -5,7 +5,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { CheckCircle, ArrowRight } from 'lucide-react-native';
 import { useTheme } from '@/contexts/ThemeContext';
 import { spacing, borderRadius } from '@/theme/spacing';
-import { LinearGradient } from 'expo-linear-gradient';
+import LinearGradient from 'react-native-linear-gradient';
 import { Text } from '@/components/common/Text';
 import { iconTransformRTL } from '@/utils/rtl';
 
@@ -31,11 +31,11 @@ export function PaymentSuccess() {
           <Text style={[styles.subtitle, isRTL && styles.textRTL]}>{t('adBeingLaunched')}</Text>
 
           <View style={styles.infoCard}>
-            <View style={[styles.infoRow, isRTL && styles.rowReverse]}>
+            <View style={styles.infoRow}>
               <Text style={[styles.infoLabel, isRTL && styles.textRTL]}>{t('status')}</Text>
               <Text style={[styles.infoValue, isRTL && styles.textRTL]}>{t('processing')}</Text>
             </View>
-            <View style={[styles.infoRow, isRTL && styles.rowReverse]}>
+            <View style={styles.infoRow}>
               <Text style={[styles.infoLabel, isRTL && styles.textRTL]}>{t('estimatedStart')}</Text>
               <Text style={[styles.infoValue, isRTL && styles.textRTL]}>{t('within30Min')}</Text>
             </View>
@@ -43,7 +43,7 @@ export function PaymentSuccess() {
 
           <Text style={[styles.message, isRTL && styles.textRTL]}>{t('notifyWhenLive')}</Text>
 
-          <View style={[styles.actions, isRTL && styles.rowReverse]}>
+          <View style={styles.actions}>
             <TouchableOpacity
               style={styles.primaryButton}
               onPress={() => navigation.navigate('Main', { screen: 'Dashboard' })}
@@ -52,7 +52,7 @@ export function PaymentSuccess() {
             </TouchableOpacity>
             {campaignId && (
               <TouchableOpacity
-                style={[styles.secondaryButton, isRTL && styles.rowReverse]}
+                style={styles.secondaryButton}
                 onPress={() => navigation.navigate('CampaignDetail', { id: campaignId })}
               >
                 <Text style={[styles.secondaryButtonText, isRTL && styles.textRTL]}>{t('viewCampaigns')}</Text>
@@ -72,9 +72,6 @@ const createStyles = (colors: any, isRTL?: boolean) => StyleSheet.create({
   },
   gradient: {
     flex: 1,
-  },
-  rowReverse: {
-    flexDirection: 'row',
   },
   textRTL: {
     textAlign: 'right',

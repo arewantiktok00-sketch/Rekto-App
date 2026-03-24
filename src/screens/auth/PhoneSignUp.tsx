@@ -1,6 +1,7 @@
 import { Text } from '@/components/common/Text';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useRemoteConfig } from '@/contexts/RemoteConfigContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { supabase } from '@/integrations/supabase/client';
 import { borderRadius, spacing } from '@/theme/spacing';
@@ -8,15 +9,16 @@ import { normalizePhoneToE164 } from '@/utils/phone';
 import { iconTransformRTL, inputStyleRTL } from '@/utils/rtl';
 import { toast } from '@/utils/toast';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { ArrowLeft, Globe2, Mail, MessageCircle, Phone as PhoneIcon } from 'lucide-react-native';
 import React, { useState } from 'react';
 import { Alert, KeyboardAvoidingView, Linking, Platform, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 
 export function PhoneSignUp() {
   const navigation = useNavigation();
   const route = useRoute();
   const { t, language } = useLanguage();
+  const { isPaymentsHidden } = useRemoteConfig();
   const { checkBlockedStatus } = useAuth();
   const { colors } = useTheme();
   const styles = createStyles(colors);
@@ -46,7 +48,7 @@ export function PhoneSignUp() {
 
   const handleSendOTP = async () => {
     if (!phone || phone.length < 10) {
-      toast.warning('Required', 'Please enter a valid phone number');
+      toast.warning(t('required'), t('invalidPhoneNumber'));
       return;
     }
 
@@ -62,20 +64,16 @@ export function PhoneSignUp() {
       if (data?.error) throw new Error(data.error);
 
       if (data?.hasValidToken) {
-        const waitMinutes = Math.ceil((data.cooldown || 0) / 60);
-        toast.info(
-          'Please Wait',
-          data.message || `Please wait ${waitMinutes} minutes before requesting a new code`
-        );
+        toast.info(t('pleaseWait'), t('pleaseWaitMinutes'));
         setStep('otp');
         return;
       }
 
-      toast.success('Code Sent', 'Check your phone for the code');
+      toast.success(t('codeSent'), t('codeSentViaWhatsApp'));
 
       setStep('otp');
     } catch (error: any) {
-      toast.error('Error', error.message || 'Failed to send code');
+      toast.error(t('error'), t('couldNotSendCode'));
     } finally {
       setLoading(false);
     }
@@ -84,7 +82,7 @@ export function PhoneSignUp() {
   const handleVerifyOTP = async () => {
     const otpCode = otp.join('');
     if (otpCode.length !== 6) {
-      toast.warning('Invalid code', 'Please enter the 6-digit code');
+      toast.warning(t('error'), t('invalidCode'));
       return;
     }
 
@@ -106,10 +104,10 @@ export function PhoneSignUp() {
         error?.attemptsRemaining ??
         null;
       toast.error(
-        'Verification Failed',
+        t('verificationFailed'),
         attemptsRemaining !== null
-          ? `${error.message || 'Invalid code'}. Attempts left: ${attemptsRemaining}`
-          : error.message || 'Invalid code'
+          ? `${error.message || t('invalidCodeTryAgain')} (${t('attemptsLeft')}: ${attemptsRemaining})`
+          : error.message || t('invalidCodeTryAgain')
       );
       clearOtp();
     } finally {
@@ -119,7 +117,7 @@ export function PhoneSignUp() {
 
   const handleCompleteSignUp = async () => {
     if (!fullName || !password || password.length < 8) {
-      toast.warning('Required', 'Please enter name and a valid password');
+      toast.warning(t('required'), t('pleaseEnterEmailPassword'));
       return;
     }
 
@@ -143,9 +141,9 @@ export function PhoneSignUp() {
       if (data?.error) {
         const errorMsg = data.error;
         if (errorMsg.includes('already registered') || errorMsg.includes('Please log in')) {
-          toast.error('Account Exists', errorMsg);
+          toast.error(t('error'), t('accountAlreadyExists'));
         } else {
-          toast.error('Error', errorMsg);
+          toast.error(t('error'), t('somethingWentWrong'));
         }
         return;
       }
@@ -199,9 +197,9 @@ export function PhoneSignUp() {
         });
       }
 
-      toast.success('Signup successful', 'Your account is ready');
+      toast.success(t('signupSuccessful'), t('yourAccountIsReady'));
     } catch (error: any) {
-      toast.error('Error', error.message || 'Signup failed');
+      toast.error(t('error'), t('somethingWentWrong'));
     } finally {
       setLoading(false);
     }
@@ -325,16 +323,18 @@ export function PhoneSignUp() {
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity
-            style={styles.helpContainer}
-            activeOpacity={0.8}
-            onPress={() => Linking.openURL('https://wa.me/9647504881516')}
-          >
-            <MessageCircle size={16} color={colors.foreground.muted} />
-            <Text style={styles.helpText}>
-              {t('needHelpChatWithUs') || 'Chat with us on WhatsApp'}
-            </Text>
-          </TouchableOpacity>
+          {!isPaymentsHidden && (
+            <TouchableOpacity
+              style={styles.helpContainer}
+              activeOpacity={0.8}
+              onPress={() => Linking.openURL('https://wa.me/9647504881516')}
+            >
+              <MessageCircle size={16} color={colors.foreground.muted} />
+              <Text style={styles.helpText}>
+                {t('needHelpChatWithUs') || 'Chat with us on WhatsApp'}
+              </Text>
+            </TouchableOpacity>
+          )}
 
           <View style={styles.termsContainer}>
             <Text style={styles.termsText}>

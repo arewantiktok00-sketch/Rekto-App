@@ -1,0 +1,605 @@
+diff --git a/node_modules/@gorhom/bottom-sheet/src/components/bottomSheet/BottomSheet.tsx b/node_modules/@gorhom/bottom-sheet/src/components/bottomSheet/BottomSheet.tsx
+index 6748c93..048cd7b 100644
+--- a/node_modules/@gorhom/bottom-sheet/src/components/bottomSheet/BottomSheet.tsx
++++ b/node_modules/@gorhom/bottom-sheet/src/components/bottomSheet/BottomSheet.tsx
+@@ -204,13 +204,14 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+       bottomInset
+     );
+     const animatedSheetHeight = useDerivedValue(() => {
+-      const { containerHeight } = animatedLayoutState.get();
+-      const { highestDetentPosition } = animatedDetentsState.get();
+-
++      const layout = animatedLayoutState.get();
++      const detents = animatedDetentsState.get();
++      if (!layout || !detents) return INITIAL_LAYOUT_VALUE;
++      const { containerHeight } = layout;
++      const { highestDetentPosition } = detents;
+       if (highestDetentPosition === undefined) {
+         return INITIAL_LAYOUT_VALUE;
+       }
+-
+       return containerHeight - highestDetentPosition;
+     }, [animatedLayoutState, animatedDetentsState]);
+     const animatedCurrentIndex = useReactiveSharedValue(
+@@ -223,8 +224,11 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+       !animateOnMount || _providedIndex === -1
+     );
+     const isLayoutCalculated = useDerivedValue(() => {
++      const layout = animatedLayoutState.get();
++      const detentsState = animatedDetentsState.get();
++      if (!layout || !detentsState) return false;
+       let isContainerHeightCalculated = false;
+-      const { containerHeight, handleHeight } = animatedLayoutState.get();
++      const { containerHeight, handleHeight } = layout;
+       //container height was provided.
+       if (containerHeight !== null || containerHeight !== undefined) {
+         isContainerHeightCalculated = true;
+@@ -245,7 +249,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+       }
+ 
+       let isSnapPointsNormalized = false;
+-      const { detents } = animatedDetentsState.get();
++      const { detents } = detentsState;
+       // the first snap point did normalized
+       if (detents) {
+         isSnapPointsNormalized = true;
+@@ -289,22 +293,25 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+       source: ANIMATION_SOURCE.MOUNT,
+     });
+     const animatedSheetState = useDerivedValue(() => {
+-      const { detents, closedDetentPosition } = animatedDetentsState.get();
+-
+-      if (
+-        !detents ||
+-        detents.length === 0 ||
+-        closedDetentPosition === undefined
+-      ) {
++      let detentsState;
++      try {
++        detentsState = animatedDetentsState.get();
++      } catch (_) {
+         return SHEET_STATE.CLOSED;
+       }
++      if (!detentsState || detentsState.detents == null || detentsState.closedDetentPosition == null) return SHEET_STATE.CLOSED;
++      const detents = detentsState.detents;
++      const closedDetentPosition = detentsState.closedDetentPosition;
++      if (!detents.length) return SHEET_STATE.CLOSED;
+ 
+       // closed position = position >= container height
+       if (animatedPosition.value >= closedDetentPosition) {
+         return SHEET_STATE.CLOSED;
+       }
+ 
+-      const { containerHeight } = animatedLayoutState.get();
++      const layout = animatedLayoutState.get();
++      if (!layout) return SHEET_STATE.CLOSED;
++      const { containerHeight } = layout;
+       // extended position = container height - sheet height
+       const extendedPosition = containerHeight - animatedSheetHeight.value;
+       if (animatedPosition.value === extendedPosition) {
+@@ -313,8 +320,8 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+ 
+       // extended position with keyboard =
+       // container height - (sheet height + keyboard height in root container)
+-      const keyboardHeightInContainer =
+-        animatedKeyboardState.get().heightWithinContainer;
++      const keyboardState = animatedKeyboardState.get();
++      const keyboardHeightInContainer = keyboardState?.heightWithinContainer ?? 0;
+       const extendedPositionWithKeyboard = Math.max(
+         0,
+         containerHeight -
+@@ -363,10 +370,14 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+     );
+     // dynamic
+     const animatedIndex = useDerivedValue(() => {
+-      const { detents } = animatedDetentsState.get();
+-      if (!detents || detents.length === 0) {
++      let detentsState;
++      try {
++        detentsState = animatedDetentsState.get();
++      } catch (_) {
+         return -1;
+       }
++      if (!detentsState || !detentsState.detents || !detentsState.detents.length) return -1;
++      const detents = detentsState.detents;
+ 
+       const adjustedSnapPoints = detents.slice().reverse();
+       const adjustedSnapPointsIndexes = detents
+@@ -374,7 +385,9 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+         .map((_, index: number) => index)
+         .reverse();
+ 
+-      const { containerHeight } = animatedLayoutState.get();
++      const layout = animatedLayoutState.get();
++      if (!layout) return -1;
++      const { containerHeight } = layout;
+       /**
+        * we add the close state index `-1`
+        */
+@@ -454,7 +467,8 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+           return;
+         }
+ 
+-        const { dynamicDetentIndex } = animatedDetentsState.get();
++        const detentsState = animatedDetentsState.get();
++        const dynamicDetentIndex = detentsState?.dynamicDetentIndex;
+ 
+         _providedOnChange(
+           index,
+@@ -633,7 +647,9 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+          */
+         let offset = 0;
+ 
+-        const { status, heightWithinContainer } = animatedKeyboardState.get();
++        const keyboardState = animatedKeyboardState.get();
++        if (!keyboardState) return;
++        const { status, heightWithinContainer } = keyboardState;
+         const sheetState = animatedSheetState.get();
+         if (
+           status === KEYBOARD_STATUS.SHOWN &&
+@@ -646,8 +662,9 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+         ) {
+           offset = heightWithinContainer;
+         }
+-        const { detents, closedDetentPosition, highestDetentPosition } =
+-          animatedDetentsState.get();
++        const detentsState = animatedDetentsState.get();
++        if (!detentsState) return;
++        const { detents, closedDetentPosition, highestDetentPosition } = detentsState;
+         let index = detents?.indexOf(position + offset) ?? -1;
+ 
+         /**
+@@ -748,7 +765,8 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+         /**
+          * store next position
+          */
+-        const { detents } = animatedDetentsState.get();
++        const detentsState = animatedDetentsState.get();
++        const detents = detentsState?.detents;
+         const index = detents?.indexOf(targetPosition) ?? -1;
+         animatedAnimationState.set(state => {
+           'worklet';
+@@ -784,9 +802,11 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+       function getEvaluatedPosition(source: ANIMATION_SOURCE) {
+         'worklet';
+         const currentIndex = animatedCurrentIndex.value;
+-        const { detents, highestDetentPosition, closedDetentPosition } =
+-          animatedDetentsState.get();
+-        const keyboardStatus = animatedKeyboardState.get().status;
++        const detentsState = animatedDetentsState.get();
++        if (!detentsState) return;
++        const { detents, highestDetentPosition, closedDetentPosition } = detentsState;
++        const keyboardState = animatedKeyboardState.get();
++        const keyboardStatus = keyboardState?.status ?? KEYBOARD_STATUS.UNDETERMINED;
+ 
+         if (
+           detents === undefined ||
+@@ -850,8 +870,8 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+           )
+         ) {
+           isInTemporaryPosition.value = true;
+-          const keyboardHeightInContainer =
+-            animatedKeyboardState.get().heightWithinContainer;
++          const kb = animatedKeyboardState.get();
++          const keyboardHeightInContainer = kb?.heightWithinContainer ?? 0;
+           return Math.max(0, highestDetentPosition - keyboardHeightInContainer);
+         }
+ 
+@@ -930,7 +950,9 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+           isForcedClosing,
+         } = animatedAnimationState.get();
+ 
+-        const { detents, closedDetentPosition } = animatedDetentsState.get();
++        const detentsState = animatedDetentsState.get();
++        if (!detentsState) return;
++        const { detents, closedDetentPosition } = detentsState;
+         if (
+           detents === undefined ||
+           detents.length === 0 ||
+@@ -1075,10 +1097,11 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+       index: number,
+       animationConfigs?: WithSpringConfig | WithTimingConfig
+     ) {
+-      const { detents } = animatedDetentsState.get();
++      const detentsState = animatedDetentsState.get();
++      const detents = detentsState?.detents;
+       const isLayoutReady = isLayoutCalculated.get();
+ 
+-      if (detents === undefined || detents.length === 0) {
++      if (!detentsState || detents === undefined || detents.length === 0) {
+         return;
+       }
+ 
+@@ -1151,7 +1174,9 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+           });
+         }
+ 
+-        const { containerHeight } = animatedLayoutState.get();
++        const layout = animatedLayoutState.get();
++        if (!layout) return;
++        const { containerHeight } = layout;
+         /**
+          * normalized provided position.
+          */
+@@ -1203,8 +1228,8 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+           });
+         }
+ 
+-        const closedDetentPosition =
+-          animatedDetentsState.get().closedDetentPosition;
++        const detentsState = animatedDetentsState.get();
++        const closedDetentPosition = detentsState?.closedDetentPosition;
+         if (closedDetentPosition === undefined) {
+           return;
+         }
+@@ -1257,8 +1282,9 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+           });
+         }
+ 
++        const detentsStateForce = animatedDetentsState.get();
+         const closedDetentPosition =
+-          animatedDetentsState.get().closedDetentPosition;
++          detentsStateForce?.closedDetentPosition;
+         if (closedDetentPosition === undefined) {
+           return;
+         }
+@@ -1316,13 +1342,14 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+           });
+         }
+ 
+-        const { detents } = animatedDetentsState.get();
+-        if (detents === undefined || detents.length === 0) {
++        const detentsStateExpand = animatedDetentsState.get();
++        const detentsExpand = detentsStateExpand?.detents;
++        if (!detentsStateExpand || detentsExpand === undefined || detentsExpand.length === 0) {
+           return;
+         }
+ 
+-        const targetIndex = detents.length - 1;
+-        const targetPosition = detents[targetIndex];
++        const targetIndex = detentsExpand.length - 1;
++        const targetPosition = detentsExpand[targetIndex];
+ 
+         /**
+          * exit method if :
+@@ -1372,12 +1399,13 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+           });
+         }
+ 
+-        const { detents } = animatedDetentsState.get();
+-        if (detents === undefined || detents.length === 0) {
++        const detentsStateCollapse = animatedDetentsState.get();
++        const detentsCollapse = detentsStateCollapse?.detents;
++        if (!detentsStateCollapse || detentsCollapse === undefined || detentsCollapse.length === 0) {
+           return;
+         }
+ 
+-        const targetPosition = detents[0];
++        const targetPosition = detentsCollapse[0];
+ 
+         /**
+          * exit method if :
+@@ -1388,7 +1416,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+         const { nextPosition, nextIndex, isForcedClosing } =
+           animatedAnimationState.get();
+         if (
+-          !isLayoutCalculated ||
++          !isLayoutCalculated.value ||
+           nextIndex === 0 ||
+           targetPosition === nextPosition ||
+           isForcedClosing
+@@ -1520,7 +1548,10 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+ 
+     //#region effects
+     useAnimatedReaction(
+-      () => animatedLayoutState.get().containerHeight,
++      () => {
++        const layout = animatedLayoutState.get();
++        return layout?.containerHeight ?? INITIAL_LAYOUT_VALUE;
++      },
+       (result, previous) => {
+         if (result === INITIAL_LAYOUT_VALUE) {
+           return;
+@@ -1528,7 +1559,8 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+ 
+         animatedContainerHeightDidChange.value = result !== previous;
+ 
+-        const { closedDetentPosition } = animatedDetentsState.get();
++        const detentsState = animatedDetentsState.get();
++        const closedDetentPosition = detentsState?.closedDetentPosition;
+         if (closedDetentPosition === undefined) {
+           return;
+         }
+@@ -1568,7 +1600,10 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+      * @alias OnSnapPointsChange
+      */
+     useAnimatedReaction(
+-      () => animatedDetentsState.get().detents,
++      () => {
++        const state = animatedDetentsState.get();
++        return state?.detents;
++      },
+       (result, previous) => {
+         /**
+          * if values did not change, and did handle on mount animation
+@@ -1610,8 +1645,10 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+      * @alias OnKeyboardStateChange
+      */
+     useAnimatedReaction(
+-      () =>
+-        animatedKeyboardState.get().status + animatedKeyboardState.get().height,
++      () => {
++        const kb = animatedKeyboardState.get();
++        return (kb?.status ?? '') + (kb?.height ?? 0);
++      },
+       (result, _previousResult) => {
+         /**
+          * if keyboard state is equal to the previous state, then exit the method
+@@ -1620,8 +1657,9 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+           return;
+         }
+ 
+-        const { status, height, easing, duration, target } =
+-          animatedKeyboardState.get();
++        const keyboardState = animatedKeyboardState.get();
++        if (!keyboardState) return;
++        const { status, height, easing, duration, target } = keyboardState;
+ 
+         /**
+          * if state is undetermined, then we early exit.
+@@ -1630,8 +1668,9 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+           return;
+         }
+ 
+-        const { status: animationStatus, source: animationSource } =
+-          animatedAnimationState.get();
++        const animationState = animatedAnimationState.get();
++        if (!animationState) return;
++        const { status: animationStatus, source: animationSource } = animationState;
+         /**
+          * if keyboard is hidden by customer gesture, then we early exit.
+          */
+@@ -1646,7 +1685,9 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+         /**
+          * Calculate the keyboard height in the container.
+          */
+-        const containerOffset = animatedLayoutState.get().containerOffset;
++        const layoutState = animatedLayoutState.get();
++        if (!layoutState) return;
++        const containerOffset = layoutState.containerOffset;
+         let heightWithinContainer =
+           height === 0
+             ? 0
+diff --git a/node_modules/@gorhom/bottom-sheet/src/components/bottomSheet/BottomSheetContent.tsx b/node_modules/@gorhom/bottom-sheet/src/components/bottomSheet/BottomSheetContent.tsx
+index a615d7d..8d01a0a 100644
+--- a/node_modules/@gorhom/bottom-sheet/src/components/bottomSheet/BottomSheetContent.tsx
++++ b/node_modules/@gorhom/bottom-sheet/src/components/bottomSheet/BottomSheetContent.tsx
+@@ -57,7 +57,9 @@ function BottomSheetContentComponent({
+ 
+   //#region variables
+   const animatedContentHeightMax = useDerivedValue(() => {
+-    const { containerHeight, handleHeight } = animatedLayoutState.get();
++    const layoutState = animatedLayoutState.get();
++    if (!layoutState) return 0;
++    const { containerHeight, handleHeight } = layoutState;
+ 
+     /**
+      * if container height is not yet calculated, then we exit the method
+@@ -66,12 +68,13 @@ function BottomSheetContentComponent({
+       return 0;
+     }
+ 
+-    const {
+-      status: keyboardStatus,
+-      heightWithinContainer: keyboardHeightWithinContainer,
+-    } = animatedKeyboardState.get();
++    const keyboardState = animatedKeyboardState.get();
++    const keyboardStatus = keyboardState?.status;
++    const keyboardHeightWithinContainer = keyboardState?.heightWithinContainer ?? 0;
+ 
+-    let contentHeight = animatedSheetHeight.get() - Math.max(0, handleHeight);
++    const sheetHeight = animatedSheetHeight.get();
++    const safeHandleHeight = typeof handleHeight === 'number' && !Number.isNaN(handleHeight) ? Math.max(0, handleHeight) : 0;
++    let contentHeight = (typeof sheetHeight === 'number' && !Number.isNaN(sheetHeight) ? sheetHeight : 0) - safeHandleHeight;
+ 
+     switch (keyboardBehavior) {
+       case KEYBOARD_BEHAVIOR.extend:
+@@ -132,7 +135,9 @@ function BottomSheetContentComponent({
+     keyboardBehavior,
+   ]);
+   const animatedPaddingBottom = useDerivedValue(() => {
+-    const containerHeight = animatedLayoutState.get().containerHeight;
++    const layoutState = animatedLayoutState.get();
++    if (!layoutState) return 0;
++    const containerHeight = layoutState.containerHeight;
+     /**
+      * if container height is not yet calculated, then we exit the method
+      */
+@@ -140,7 +145,8 @@ function BottomSheetContentComponent({
+       return 0;
+     }
+ 
+-    const { highestDetentPosition } = animatedDetentsState.get();
++    const detentsState = animatedDetentsState.get();
++    const highestDetentPosition = detentsState?.highestDetentPosition;
+ 
+     const highestSnapPoint = Math.max(
+       highestDetentPosition ?? 0,
+@@ -161,10 +167,9 @@ function BottomSheetContentComponent({
+      * if keyboard is open, then we try to add padding to prevent content
+      * from being covered by the keyboard.
+      */
+-    const {
+-      status: keyboardStatus,
+-      heightWithinContainer: keyboardHeightWithinContainer,
+-    } = animatedKeyboardState.get();
++    const keyboardState = animatedKeyboardState.get();
++    const keyboardStatus = keyboardState?.status;
++    const keyboardHeightWithinContainer = keyboardState?.heightWithinContainer ?? 0;
+     if (keyboardStatus === KEYBOARD_STATUS.SHOWN) {
+       paddingBottom = overDragSafePaddingBottom + keyboardHeightWithinContainer;
+     }
+@@ -181,12 +186,22 @@ function BottomSheetContentComponent({
+ 
+   //#region styles
+   const contentMaskContainerAnimatedStyle = useAnimatedStyle(() => {
+-    const { containerHeight, contentHeight } = animatedLayoutState.get();
++    const layoutState = animatedLayoutState.get();
++    if (!layoutState) {
++      return {
++        paddingBottom: animate({ point: 0, configs: animationConfigs, overrideReduceMotion }),
++        height: animate({ point: 0, configs: animationConfigs, overrideReduceMotion }),
++      };
++    }
++    const { containerHeight, contentHeight } = layoutState;
+     /**
+      * if container height is not yet calculated, then we exit the method
+      */
+     if (containerHeight === INITIAL_LAYOUT_VALUE) {
+-      return {};
++      return {
++        paddingBottom: animate({ point: 0, configs: animationConfigs, overrideReduceMotion }),
++        height: animate({ point: 0, configs: animationConfigs, overrideReduceMotion }),
++      };
+     }
+ 
+     /**
+@@ -194,11 +209,16 @@ function BottomSheetContentComponent({
+      * is still not set, then we exit method.
+      */
+     if (enableDynamicSizing && contentHeight === INITIAL_LAYOUT_VALUE) {
+-      return {};
++      return {
++        paddingBottom: animate({ point: 0, configs: animationConfigs, overrideReduceMotion }),
++        height: animate({ point: 0, configs: animationConfigs, overrideReduceMotion }),
++      };
+     }
+ 
+-    const paddingBottom = detached ? 0 : animatedPaddingBottom.get();
+-    const height = animatedContentHeightMax.get() + paddingBottom;
++    const padBottom = detached ? 0 : animatedPaddingBottom.get();
++    const maxHeight = animatedContentHeightMax.get();
++    const paddingBottom = typeof padBottom === 'number' && !Number.isNaN(padBottom) ? padBottom : 0;
++    const height = typeof maxHeight === 'number' && !Number.isNaN(maxHeight) ? Math.max(0, maxHeight + paddingBottom) : paddingBottom;
+ 
+     return {
+       paddingBottom: animate({
+diff --git a/node_modules/@gorhom/bottom-sheet/src/components/bottomSheetFooter/BottomSheetFooter.tsx b/node_modules/@gorhom/bottom-sheet/src/components/bottomSheetFooter/BottomSheetFooter.tsx
+index 639f2af..3aee299 100644
+--- a/node_modules/@gorhom/bottom-sheet/src/components/bottomSheetFooter/BottomSheetFooter.tsx
++++ b/node_modules/@gorhom/bottom-sheet/src/components/bottomSheetFooter/BottomSheetFooter.tsx
+@@ -28,19 +28,36 @@ function BottomSheetFooterComponent({
+ 
+   //#region styles
+   const containerAnimatedStyle = useAnimatedStyle(() => {
+-    let footerTranslateY = animatedFooterPosition.get();
++    // Safely read footer position; fall back to 0 if unset or invalid
++    let rawFooterTranslateY = 0;
++    try {
++      const v = animatedFooterPosition.get();
++      rawFooterTranslateY =
++        typeof v === 'number' && !Number.isNaN(v) ? v : 0;
++    } catch (_) {
++      rawFooterTranslateY = 0;
++    }
++
++    let footerTranslateY = rawFooterTranslateY;
+ 
+     /**
+      * Offset the bottom inset only when keyboard is not shown
+      */
+-    if (animatedKeyboardState.get().status !== KEYBOARD_STATUS.SHOWN) {
++    const keyboardState = animatedKeyboardState.get();
++    const keyboardStatus = keyboardState?.status;
++    if (keyboardStatus !== KEYBOARD_STATUS.SHOWN) {
+       footerTranslateY = footerTranslateY - bottomInset;
+     }
+ 
++    const safeTranslateY =
++      typeof footerTranslateY === 'number' && !Number.isNaN(footerTranslateY)
++        ? Math.max(0, footerTranslateY)
++        : 0;
++
+     return {
+       transform: [
+         {
+-          translateY: Math.max(0, footerTranslateY),
++          translateY: safeTranslateY,
+         },
+       ],
+     };
+diff --git a/node_modules/@gorhom/bottom-sheet/src/hooks/useAnimatedDetents.ts b/node_modules/@gorhom/bottom-sheet/src/hooks/useAnimatedDetents.ts
+index cc34d3b..26eacb9 100644
+--- a/node_modules/@gorhom/bottom-sheet/src/hooks/useAnimatedDetents.ts
++++ b/node_modules/@gorhom/bottom-sheet/src/hooks/useAnimatedDetents.ts
+@@ -4,6 +4,12 @@ import { INITIAL_LAYOUT_VALUE } from '../constants';
+ import type { DetentsState, LayoutState } from '../types';
+ import { normalizeSnapPoint } from '../utilities';
+ 
++const EMPTY_DETENTS_STATE: DetentsState = {
++  detents: [],
++  closedDetentPosition: 0,
++  highestDetentPosition: 0,
++};
++
+ /**
+  * A custom hook that computes and returns the animated detent positions for a bottom sheet component.
+  *
+@@ -29,11 +35,22 @@ export const useAnimatedDetents = (
+   bottomInset: BottomSheetProps['bottomInset'] = 0
+ ) => {
+   const state = useDerivedValue<DetentsState>(() => {
+-    const { containerHeight, handleHeight, contentHeight } = layoutState.get();
++    'worklet';
++    // Guard: layoutState.get() can be undefined on first run or before layout is ready
++    let layout: LayoutState | undefined;
++    try {
++      layout = layoutState.get();
++    } catch (_) {
++      return EMPTY_DETENTS_STATE;
++    }
++    if (!layout || typeof layout.containerHeight === 'undefined') {
++      return EMPTY_DETENTS_STATE;
++    }
++    const { containerHeight, handleHeight, contentHeight } = layout;
+ 
+     // early exit, if container layout is not ready
+     if (containerHeight === INITIAL_LAYOUT_VALUE) {
+-      return {};
++      return EMPTY_DETENTS_STATE;
+     }
+ 
+     // extract detents from provided props
+@@ -67,12 +84,12 @@ export const useAnimatedDetents = (
+     // early exit, if dynamic sizing is enabled and
+     // content height is not calculated yet.
+     if (contentHeight === INITIAL_LAYOUT_VALUE) {
+-      return {};
++      return EMPTY_DETENTS_STATE;
+     }
+ 
+     // early exit, if handle height is not calculated yet.
+     if (handleHeight === INITIAL_LAYOUT_VALUE) {
+-      return {};
++      return EMPTY_DETENTS_STATE;
+     }
+ 
+     // calculate a new detents based on content height.
+diff --git a/node_modules/@gorhom/bottom-sheet/src/hooks/useScrollable.ts b/node_modules/@gorhom/bottom-sheet/src/hooks/useScrollable.ts
+index 96021b5..3cc6985 100644
+--- a/node_modules/@gorhom/bottom-sheet/src/hooks/useScrollable.ts
++++ b/node_modules/@gorhom/bottom-sheet/src/hooks/useScrollable.ts
+@@ -66,9 +66,11 @@ export const useScrollable = (
+      * then we do not lock the scrolling to not lose
+      * current scrollable scroll position.
+      */
++    const keyboardState = animatedKeyboardState.get();
++    const animationState = animatedAnimationState.get();
+     if (
+-      animatedKeyboardState.get().status === KEYBOARD_STATUS.SHOWN &&
+-      animatedAnimationState.get().status === ANIMATION_STATUS.RUNNING
++      keyboardState?.status === KEYBOARD_STATUS.SHOWN &&
++      animationState?.status === ANIMATION_STATUS.RUNNING
+     ) {
+       return SCROLLABLE_STATUS.UNLOCKED;
+     }

@@ -1,10 +1,17 @@
 /**
  * OneSignal Push Notifications Integration
+ * Stale push suppression: only show in-app toast and system notification for pushes received within 60s.
  */
 
 import { supabase } from '@/integrations/supabase/client';
 import { navigate } from '@/navigation/navigationService';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import { translateNotification } from '@/utils/notificationTranslator';
+import { toast } from '@/utils/toast';
+
+const MAX_TOAST_AGE_MS = 60_000; // 60 seconds — suppress toast for older queued pushes
+const LANGUAGE_STORAGE_KEY = 'rekto-language';
 
 // Try to import OneSignal - may fail if not properly configured
 let OneSignal: any = null;
@@ -54,16 +61,41 @@ export const initializeOneSignal = async (userId?: string, navigation?: any) => 
       });
     }
     
-    // Foreground notification handling
+    // Foreground notification handling: suppress toast and system notification for stale (queued) pushes
     if (OneSignal.Notifications && OneSignal.Notifications.addEventListener) {
       OneSignal.Notifications.addEventListener('foregroundWillDisplay', (event: any) => {
         const notification = event?.getNotification?.() || event?.notification;
+        const notificationTime = notification?.sentTime ?? notification?.createdAt ?? Date.now();
+        const ageMs = Date.now() - (typeof notificationTime === 'number' ? notificationTime : new Date(notificationTime).getTime());
+        if (ageMs > MAX_TOAST_AGE_MS) {
+          if (__DEV__) {
+            console.log('[Notifications] Suppressing stale push:', ageMs, 'ms old');
+          }
+          try {
+            if (typeof (event as any)?.preventDefault === 'function') (event as any).preventDefault();
+          } catch (_) {}
+          return;
+        }
         if (__DEV__) {
           console.log('[OneSignal] Foreground notification:', notification?.title);
         }
-        // Show the system notification in foreground
         if (event?.display) {
           event.display();
+        }
+        const title = notification?.title ?? '';
+        const body = notification?.body ?? notification?.additionalData?.body ?? '';
+        if (title || body) {
+          void (async () => {
+            let language: 'ckb' | 'ar' | 'en' = 'ckb';
+            try {
+              const storedLanguage = await AsyncStorage.getItem(LANGUAGE_STORAGE_KEY);
+              if (storedLanguage === 'ar') {
+                language = 'ar';
+              }
+            } catch (_) {}
+            const translated = translateNotification(title || 'Notification', body || '', language);
+            toast.info(translated.title || title || 'Notification', translated.message || body || '');
+          })();
         }
       });
 

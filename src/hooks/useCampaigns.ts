@@ -1,13 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { supabase, supabaseRead } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getMonotonicMetrics } from '@/utils/metricsCache';
+import { hydrateCampaignPublicUrls } from '@/utils/tiktokVideoLink';
 import { getCampaignMemoryCache, setCampaignMemoryCache } from '@/services/campaignCache';
 import { setCampaignsCache, getCached } from '@/services/globalCache';
+import { prepareAndUpdateWidgetCampaigns } from '@/utils/widgetBridge';
 
 const CACHE_KEY = 'campaigns_cache';
 const CACHE_EXPIRY = 5 * 60 * 1000; // 5 minutes
-const REJECTED_HIDE_AFTER_MS = 30 * 60 * 1000; // 30 minutes
 
 interface Campaign {
   id: string;
@@ -33,67 +34,52 @@ interface Campaign {
 
 interface UseCampaignsOptions {
   userId: string;
-  filter?: 'all' | 'active' | 'pending' | 'completed' | 'rejected';
-  autoRefresh?: boolean;
-  refreshInterval?: number;
 }
 
+/** Fetches ALL campaigns once. Filtering is client-side in the screen (instant). */
 export function useCampaigns(options: UseCampaignsOptions) {
-  const { userId, filter = 'all', autoRefresh = true, refreshInterval = 30000 } = options;
+  const { userId } = options;
+  // Seed only from THIS user's memory cache — never use global cache (could be another user's data)
   const initialFromMemory = userId ? getCampaignMemoryCache(userId) : [];
-  const cachedCampaigns = getCached<Campaign[]>('campaigns', []);
-  const initialSeed = initialFromMemory.length > 0 ? initialFromMemory : cachedCampaigns;
-  const filteredInitial =
-    filter === 'all'
-      ? initialSeed
-      : initialSeed.filter((campaign) => {
-          const status = (campaign.status || '').toLowerCase();
-          if (filter === 'active') {
-            return ['active', 'running'].includes(status);
-          }
-          if (filter === 'pending') {
-            return ['pending', 'waiting_for_admin', 'in_review', 'scheduled'].includes(status);
-          }
-          if (filter === 'completed') {
-            return ['completed', 'paused'].includes(status);
-          }
-          if (filter === 'rejected') {
-            return ['rejected', 'failed'].includes(status);
-          }
-          return true;
-        });
-  const [campaigns, setCampaigns] = useState<Campaign[]>(filteredInitial);
-  const [isFirstLoad, setIsFirstLoad] = useState(filteredInitial.length === 0);
+  const initialSeed = userId && initialFromMemory.length > 0 ? initialFromMemory : [];
+  const [campaigns, setCampaigns] = useState<Campaign[]>(initialSeed);
+  const [isFirstLoad, setIsFirstLoad] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const fetchInProgressRef = useRef(false);
   const lastFetchRef = useRef(0);
   const MIN_FETCH_INTERVAL = 2000;
-  const cacheKey = userId ? `${CACHE_KEY}_${userId}_${filter}` : null;
+  const cacheKey = userId ? `${CACHE_KEY}_${userId}` : null;
 
-  const filterStaleRejections = useCallback((items: Campaign[]) => {
-    const now = Date.now();
-    return items.filter((campaign) => {
-      const status = (campaign.status || '').toLowerCase();
-      if (status !== 'rejected' && status !== 'failed') {
-        return true;
+  const persistCampaigns = useCallback(
+    async (items: Campaign[]) => {
+      if (cacheKey) {
+        try {
+          await AsyncStorage.setItem(
+            cacheKey,
+            JSON.stringify({
+              data: items,
+              timestamp: Date.now(),
+            })
+          );
+        } catch (cacheError) {
+          console.warn('Failed to cache campaigns:', cacheError);
+        }
       }
-      const rawTimestamp =
-        (campaign as any).status_updated_at ||
-        campaign.updated_at ||
-        campaign.created_at;
-      const timestamp = rawTimestamp ? new Date(rawTimestamp).getTime() : 0;
-      if (!timestamp || Number.isNaN(timestamp)) {
-        return true;
-      }
-      return now - timestamp < REJECTED_HIDE_AFTER_MS;
-    });
-  }, []);
 
-  const fetchCampaigns = useCallback(async (showLoading = false) => {
+      setCampaigns(items);
+      setCampaignMemoryCache(userId, items);
+      setCampaignsCache(items);
+      const topResultsFallback = getCached<any[]>('topResults', []);
+      prepareAndUpdateWidgetCampaigns(items, topResultsFallback).catch(() => {});
+    },
+    [cacheKey, userId]
+  );
+
+  const fetchCampaigns = useCallback(async (showLoading = false, force = false) => {
     if (!userId || fetchInProgressRef.current) return;
 
     const now = Date.now();
-    if (now - lastFetchRef.current < MIN_FETCH_INTERVAL) {
+    if (!force && now - lastFetchRef.current < MIN_FETCH_INTERVAL) {
       return;
     }
 
@@ -105,33 +91,25 @@ export function useCampaigns(options: UseCampaignsOptions) {
     }
 
     try {
-      let query = supabaseRead
+      if (!supabase) {
+        console.error('[Campaigns] Supabase client not available');
+        return [];
+      }
+      // RLS: requires authenticated session; use user_id filter
+      const { data, error } = await supabase
         .from('campaigns')
         .select('*')
         .eq('user_id', userId)
         .order('created_at', { ascending: false });
 
-      if (filter !== 'all') {
-        if (filter === 'active') {
-          query = query.in('status', ['active', 'running']);
-        } else if (filter === 'pending') {
-          query = query.in('status', ['pending', 'waiting_for_admin', 'in_review', 'scheduled']);
-        } else if (filter === 'completed') {
-          query = query.in('status', ['completed', 'paused']);
-        } else if (filter === 'rejected') {
-          query = query.in('status', ['rejected', 'failed']);
-        }
-      }
-
-      const { data, error } = await query;
-
       if (error) {
-        console.error('Error fetching campaigns:', error);
+        console.error('[Campaigns] Fetch error:', error.message, error);
+        await persistCampaigns([]);
         return [];
       }
 
-      const campaignsData = filterStaleRejections((data || []) as Campaign[]);
-      const normalized = campaignsData.map((campaign) => ({
+      const raw = (data || []) as Campaign[];
+      const normalized = raw.map((campaign) => ({
         ...campaign,
         ...getMonotonicMetrics(
           campaign.id,
@@ -140,25 +118,19 @@ export function useCampaigns(options: UseCampaignsOptions) {
           campaign.leads ?? 0,
           campaign.clicks ?? 0
         ),
-      }));
+      } as Campaign));
       
-      // Cache to AsyncStorage
-      if (cacheKey) {
-        try {
-          await AsyncStorage.setItem(cacheKey, JSON.stringify({
-            data: normalized,
-            timestamp: Date.now(),
-          }));
-        } catch (cacheError) {
-          console.warn('Failed to cache campaigns:', cacheError);
-        }
-      }
-
-      setCampaigns(normalized);
-      if (filter === 'all') {
-        setCampaignMemoryCache(userId, normalized);
-        setCampaignsCache(normalized);
-      }
+      await persistCampaigns(normalized);
+      hydrateCampaignPublicUrls(normalized)
+        .then((hydrated) => {
+          const changed = hydrated.some(
+            (campaign, index) => campaign.tiktok_public_url !== normalized[index]?.tiktok_public_url
+          );
+          if (changed) {
+            void persistCampaigns(hydrated);
+          }
+        })
+        .catch(() => {});
       setIsFirstLoad(false);
       return normalized;
     } catch (error: any) {
@@ -168,7 +140,7 @@ export function useCampaigns(options: UseCampaignsOptions) {
       fetchInProgressRef.current = false;
       setIsRefreshing(false);
     }
-  }, [userId, filter]);
+  }, [persistCampaigns, userId]);
 
   // Load cached data first, then fetch fresh
   useEffect(() => {
@@ -189,8 +161,7 @@ export function useCampaigns(options: UseCampaignsOptions) {
             
             // Use cache if less than 5 minutes old
             if (parsed.data && cacheAge < CACHE_EXPIRY) {
-              const filtered = filterStaleRejections(parsed.data as Campaign[]);
-              const normalized = filtered.map((campaign) => ({
+              const normalized = (parsed.data as Campaign[]).map((campaign) => ({
                 ...campaign,
                 ...getMonotonicMetrics(
                   campaign.id,
@@ -200,11 +171,7 @@ export function useCampaigns(options: UseCampaignsOptions) {
                   campaign.clicks ?? 0
                 ),
               }));
-              setCampaigns(normalized);
-              if (filter === 'all') {
-                setCampaignMemoryCache(userId, normalized);
-                setCampaignsCache(normalized);
-              }
+              await persistCampaigns(normalized);
               setIsFirstLoad(false); // Hide loading immediately
             }
           }
@@ -214,68 +181,18 @@ export function useCampaigns(options: UseCampaignsOptions) {
       }
 
       // Then fetch fresh data in BACKGROUND (no loading spinner)
-      fetchCampaigns(false);
+      void fetchCampaigns(false, true);
     };
 
-    loadCachedAndFetch();
-  }, [userId, filter, fetchCampaigns, cacheKey]);
-
-  // Auto-refresh in background
-  useEffect(() => {
-    if (!autoRefresh || !userId) return;
-
-    let timeout: ReturnType<typeof setTimeout> | null = null;
-    const schedule = () => {
-      const jitter = 5000 + Math.random() * 5000;
-      timeout = setTimeout(() => {
-        fetchCampaigns(false);
-        schedule();
-      }, jitter);
-    };
-
-    schedule();
-
-    return () => {
-      if (timeout) {
-        clearTimeout(timeout);
-      }
-    };
-  }, [autoRefresh, userId, fetchCampaigns]);
-
-  // Real-time subscription
-  useEffect(() => {
-    if (!userId || !supabase) return;
-
-    const channel = supabase
-      .channel(`user-campaigns-${userId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'campaigns',
-          filter: `user_id=eq.${userId}`,
-        },
-        () => {
-          // Silent background refresh on change
-          fetchCampaigns(false);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      if (supabase) {
-        supabase.removeChannel(channel);
-      }
-    };
-  }, [userId, fetchCampaigns]);
+    void loadCachedAndFetch();
+  }, [userId, fetchCampaigns, cacheKey, persistCampaigns]);
 
   const refresh = useCallback(() => {
-    return fetchCampaigns(true); // Show loading on manual refresh
+    return fetchCampaigns(true, true); // Show loading on manual refresh
   }, [fetchCampaigns]);
 
   const refreshSilent = useCallback(() => {
-    return fetchCampaigns(false); // No spinner
+    return fetchCampaigns(false, true); // No spinner, but still fetch fresh data
   }, [fetchCampaigns]);
 
   const applyRealtimeUpdate = useCallback((payload: {
@@ -283,7 +200,7 @@ export function useCampaigns(options: UseCampaignsOptions) {
     new?: any;
     old?: any;
   }) => {
-    setCampaigns((prev) => {
+    setCampaigns((prev: Campaign[]) => {
       if (payload.eventType === 'DELETE') {
         const id = payload.old?.id;
         if (!id) return prev;
@@ -293,24 +210,55 @@ export function useCampaigns(options: UseCampaignsOptions) {
       const incoming = payload.new as Campaign | undefined;
       if (!incoming?.id) return prev;
 
+      // Never show deleted_external in list — remove from state
+      if ((incoming.status || '').toLowerCase() === 'deleted_external') {
+        if (payload.eventType === 'UPDATE') {
+          const next = prev.filter((c) => c.id !== incoming.id);
+          setCampaignMemoryCache(userId, next);
+          setCampaignsCache(next);
+          return next;
+        }
+        if (payload.eventType === 'INSERT') return prev;
+      }
+
       const index = prev.findIndex((campaign) => campaign.id === incoming.id);
-      const existing = index >= 0 ? prev[index] : null;
+      // Incoming row wins for budget/dates/status; only metrics are monotonic
+      const metrics = getMonotonicMetrics(
+        incoming.id,
+        incoming.views ?? 0,
+        incoming.spend ?? 0,
+        incoming.leads ?? 0,
+        incoming.clicks ?? 0
+      );
       const merged = {
-        ...incoming,
-        views: Math.max(existing?.views || 0, incoming.views || 0),
-        spend: Math.max(existing?.spend || 0, incoming.spend || 0),
-        leads: Math.max(existing?.leads || 0, incoming.leads || 0),
+        ...(index >= 0 ? { ...prev[index], ...incoming } : { ...incoming }),
+        views: metrics.views,
+        spend: metrics.spend,
+        leads: metrics.leads,
+        clicks: metrics.clicks,
       };
       const next = [...prev];
       if (index >= 0) {
-        next[index] = { ...next[index], ...merged };
+        next[index] = merged as Campaign;
       } else {
         next.unshift(merged);
       }
+      setCampaignMemoryCache(userId, next);
       setCampaignsCache(next);
-      return filterStaleRejections(next);
+      if (cacheKey) {
+        void AsyncStorage.setItem(
+          cacheKey,
+          JSON.stringify({
+            data: next,
+            timestamp: Date.now(),
+          })
+        ).catch(() => {});
+      }
+      const topResultsFallback = getCached<any[]>('topResults', []);
+      prepareAndUpdateWidgetCampaigns(next, topResultsFallback).catch(() => {});
+      return next;
     });
-  }, [filterStaleRejections]);
+  }, [cacheKey, userId]);
 
   return {
     campaigns,

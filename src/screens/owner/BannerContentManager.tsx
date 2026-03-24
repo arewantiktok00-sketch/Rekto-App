@@ -1,5 +1,6 @@
 import { ScreenHeader } from '@/components/common/ScreenHeader';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { toast } from '@/utils/toast';
 import { supabase, supabaseRead } from '@/integrations/supabase/client';
 import { getOwnerColors } from '@/theme/colors';
 import { spacing } from '@/theme/spacing';
@@ -40,7 +41,7 @@ interface Slide {
 export const BannerContentManager: React.FC = () => {
   const insets = useSafeAreaInsets();
   const colors = getOwnerColors();
-  const { language } = useLanguage();
+  const { t, language } = useLanguage();
   const fontFamily = getFontFamilyByLanguage(language || 'ckb');
   const styles = createStyles(colors, insets, fontFamily);
   const navigation = require('@react-navigation/native').useNavigation();
@@ -131,7 +132,7 @@ export const BannerContentManager: React.FC = () => {
       Alert.alert('Success', 'Banner content updated successfully');
     } catch (error: any) {
       console.error('Failed to save banner content:', error);
-      Alert.alert('Error', error.message || 'Failed to save banner content');
+        toast.error(t('error'), t('somethingWentWrong'));
     } finally {
       setSaving(false);
     }

@@ -1,23 +1,38 @@
-import { ToastProvider } from '@/components/common/ToastProvider';
-import { AuthProvider, useAuth } from '@/contexts/AuthContext';
-import { LanguageProvider, useLanguage } from '@/contexts/LanguageContext';
-import { RemoteConfigProvider } from '@/contexts/RemoteConfigContext';
-import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
-import { safeQuery, supabase } from '@/integrations/supabase/client';
-import { initializeOneSignal, logoutOneSignal } from '@/lib/onesignal';
-import RootNavigator from '@/navigation/RootNavigator';
-import { AnimatedSplash } from '@/screens/AnimatedSplash';
-import { syncCampaignsWithThumbnails } from '@/services/campaignSync';
-import { syncFeaturedCampaigns } from '@/services/featuredCampaignSync';
-import { setCached, setCampaignsCache, setNotificationsCache, setTopResultsCache, setUserLinksCache } from '@/services/globalCache';
-import { syncUserLinks } from '@/services/linksSync';
-import { syncNotifications } from '@/services/notificationsSync';
-import { getFontFamilyWithWeight } from '@/utils/fonts';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { useRemoteConfig } from './contexts/RemoteConfigContext';
+import { LanguageProvider, useLanguage } from './contexts/LanguageContext';
+import { RemoteConfigProvider } from './contexts/RemoteConfigContext';
+import { ThemeProvider, useTheme } from './contexts/ThemeContext';
+import { safeQuery, supabase } from './integrations/supabase/client';
+import { initializeOneSignal, logoutOneSignal } from './lib/onesignal';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import RootNavigator from './navigation/RootNavigator';
+import { AnimatedSplash } from './screens/AnimatedSplash';
+import { syncCampaignsWithThumbnails } from './services/campaignSync';
+import { syncFeaturedCampaigns } from './services/featuredCampaignSync';
+import { setCached, setCampaignsCache, setNotificationsCache, setTopResultsCache, setUserLinksCache } from './services/globalCache';
+import { syncUserLinks } from './services/linksSync';
+import { syncNotifications } from './services/notificationsSync';
+import { getFontFamilyWithWeight } from './utils/fonts';
+import { getExchangeRateFromSettings, fetchExchangeRate } from './lib/exchangeRate';
+import { prepareAndUpdateWidgetCampaigns, incrementAppOpenCount, updateWidgetBalance } from './utils/widgetBridge';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
-import * as Font from 'expo-font';
-import * as SplashScreen from 'expo-splash-screen';
+import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { I18nManager, Image, InteractionManager, LogBox, StatusBar, StyleSheet, Text, TextInput, View } from 'react-native';
+import { AppState, AppStateStatus, Image, InteractionManager, LogBox, StatusBar, StyleSheet, Text, TextInput, View } from 'react-native';
+import Toast from 'react-native-toast-message';
+import { toastConfig } from './components/Toast/ToastConfig';
+import { enableScreens } from 'react-native-screens';
+
+// Optional: hide native splash when app is ready (no-op if react-native-bootsplash not linked)
+const hideNativeSplash = () => {
+  try {
+    const BootSplash = require('react-native-bootsplash').default;
+    if (BootSplash?.hide) BootSplash.hide({ fade: true }).catch(() => {});
+  } catch (_) {
+    // RNBootSplash native module not in binary — ignore
+  }
+};
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -33,20 +48,37 @@ if (__DEV__) {
   ]);
 }
 
-// Keep native splash visible until JS is ready to avoid a blank screen.
-SplashScreen.preventAutoHideAsync().catch(() => {});
+// Prevent reload crashes from screen transition events
+enableScreens(false);
+
+// Native splash (BootSplash) stays visible until BootSplash.hide() is called when app is ready.
+
+// Rules of Hooks: ALL hooks must be declared at the top of AppContent, BEFORE any conditional return.
+// Do not add hooks after the "if (!appReady || showAnimatedSplash) return ..." below.
 
 function AppContent() {
   const { user } = useAuth();
-  const { isDark } = useTheme();
+  const { isDark, colors } = useTheme();
   const { language, isRTL } = useLanguage();
   const queryClient = useQueryClient();
+  const { refetch: refetchRemoteConfig } = useRemoteConfig();
   const [showAnimatedSplash, setShowAnimatedSplash] = useState(true);
   const [appReady, setAppReady] = useState(false);
   const [fontsLoaded, setFontsLoaded] = useState(false);
   const [splashAnimationDone, setSplashAnimationDone] = useState(false);
   const lastSyncRef = useRef<number>(0);
   const prefetchRef = useRef(false);
+
+  // TEMPORARY: Verify Reanimated works (remove after confirming no crash)
+  useEffect(() => {
+    try {
+      const R = require('react-native-reanimated');
+      const ok = typeof R.useSharedValue === 'function';
+      console.log('[CHECK] Reanimated OK:', ok);
+    } catch (e) {
+      console.error('[CHECK] Reanimated Failed:', e);
+    }
+  }, []);
   const prefetchAllData = useCallback(async (userId: string) => {
     try {
       const results = await Promise.allSettled([
@@ -108,6 +140,28 @@ function AppContent() {
       setUserLinksCache(userLinks);
       setNotificationsCache(notifications);
 
+      const featuredSync = await syncFeaturedCampaigns().catch(() => ({ topResults: [], featured: null }));
+      const topResults = featuredSync?.topResults ?? [];
+      if (topResults.length > 0) {
+        setTopResultsCache(topResults);
+        setCached('topResults', topResults);
+      }
+      await prepareAndUpdateWidgetCampaigns(campaigns, topResults).catch(() => {});
+
+      const availUsd = profile?.wallet_balance ?? 0;
+      const pendingRes = await safeQuery((client) =>
+        client.from('balance_requests').select('amount_iqd').eq('user_id', userId).eq('status', 'pending')
+      );
+      let pendIqd = 0;
+      if (pendingRes?.data?.length) {
+        pendIqd = (pendingRes.data as { amount_iqd?: string }[]).reduce(
+          (s, r) => s + (Number(String(r.amount_iqd ?? '').replace(/,/g, '')) || 0),
+          0
+        );
+      }
+      const rate = getExchangeRateFromSettings(appSettings);
+      updateWidgetBalance(Math.floor(availUsd * rate), pendIqd);
+
       const thumbnailUrls = (campaigns || [])
         .filter((c: any) => c?.thumbnail_url)
         .map((c: any) => c.thumbnail_url as string);
@@ -126,36 +180,46 @@ function AppContent() {
     void prefetchAllData(user.id);
   }, [appReady, showAnimatedSplash, user?.id, prefetchAllData]);
 
-  // Load custom fonts
+  // Fonts are linked natively (Info.plist UIAppFonts / Xcode). Mark app ready and hide native splash.
   useEffect(() => {
-    const loadFonts = async () => {
-      try {
-        await Font.loadAsync({
-          // Kurdish/Arabic — Rabar_021 (RTL text)
-          'Rabar_021': require('./assets/fonts/Rabar_021.ttf'),
-          // English and numbers — Poppins
-          'Poppins-Regular': require('./assets/fonts/Poppins-Regular.ttf'),
-          'Poppins-Medium': require('./assets/fonts/Poppins-Medium.ttf'),
-          'Poppins-SemiBold': require('./assets/fonts/Poppins-SemiBold.ttf'),
-          'Poppins-Bold': require('./assets/fonts/Poppins-Bold.ttf'),
-        });
-        setFontsLoaded(true);
-        setAppReady(true);
-        console.log('[App] All fonts loaded successfully');
-      } catch (error) {
-        console.warn('Failed to load fonts:', error);
-        setFontsLoaded(true); // Continue even if font loading fails
-        setAppReady(true);
-      }
+    const ready = () => {
+      setFontsLoaded(true);
+      setAppReady(true);
     };
-    loadFonts();
+    InteractionManager.runAfterInteractions(() => ready());
   }, []);
 
   useEffect(() => {
     if (appReady) {
-      SplashScreen.hideAsync().catch(() => {});
+      hideNativeSplash();
     }
   }, [appReady]);
+
+  // Increment app open count and refresh balance widget when app becomes active
+  useEffect(() => {
+    if (!appReady) return;
+    const refreshBalanceWidget = async () => {
+      if (!user?.id) return;
+      try {
+        const rate = await fetchExchangeRate();
+        const { data: profile } = await supabase.from('profiles').select('wallet_balance').eq('user_id', user.id).maybeSingle();
+        const availUsd = profile?.wallet_balance ?? 0;
+        const { data: pendingReqs } = await supabase.from('balance_requests').select('amount_iqd').eq('user_id', user.id).eq('status', 'pending');
+        let pendIqd = 0;
+        if (pendingReqs?.length) pendIqd = pendingReqs.reduce((s: number, r: { amount_iqd?: string }) => s + (Number(String(r.amount_iqd ?? '').replace(/,/g, '')) || 0), 0);
+        updateWidgetBalance(Math.floor(availUsd * rate), pendIqd);
+      } catch {}
+    };
+    const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
+      if (state === 'active') {
+        void incrementAppOpenCount();
+        void refreshBalanceWidget();
+      }
+    });
+    void incrementAppOpenCount();
+    void refreshBalanceWidget();
+    return () => sub.remove();
+  }, [appReady, user?.id]);
 
   useEffect(() => {
     const fontFamily = getFontFamilyWithWeight(language as 'ckb' | 'ar', 'regular');
@@ -206,6 +270,19 @@ function AppContent() {
   const handleAnimatedSplashFinish = useCallback(() => {
     setSplashAnimationDone(true);
   }, []);
+
+  // Auto-refresh when app comes to foreground (links, tutorials, campaigns, results, owner config)
+  useEffect(() => {
+    const handleAppStateChange = (nextState: AppStateStatus) => {
+      if (nextState !== 'active') return;
+      refetchRemoteConfig().catch(() => {});
+      if (user?.id) {
+        queryClient.invalidateQueries({ queryKey: ['user-links', user.id] });
+      }
+    };
+    const sub = AppState.addEventListener('change', handleAppStateChange);
+    return () => sub.remove();
+  }, [user?.id, queryClient, refetchRemoteConfig]);
 
   // Background sync when user becomes available (no UI changes)
   useEffect(() => {
@@ -264,36 +341,37 @@ function AppContent() {
     return () => clearTimeout(timeout);
   }, [showAnimatedSplash]);
 
-  // Show animated splash after native splash is hidden
+  // Show animated splash after native splash is hidden — wrap in full-screen view so splash fills entire screen
   if (!appReady || showAnimatedSplash) {
-    return <AnimatedSplash onFinish={handleAnimatedSplashFinish} />;
+    return (
+      <View style={{ flex: 1, backgroundColor: '#0F0F14' }}>
+        <AnimatedSplash onFinish={handleAnimatedSplashFinish} />
+      </View>
+    );
   }
 
   return (
-    <>
-      <StatusBar 
-        barStyle={isDark ? "light-content" : "dark-content"}
+    <BottomSheetModalProvider>
+      <StatusBar
+        barStyle={isDark ? 'light-content' : 'dark-content'}
         backgroundColor="transparent"
         translucent={true}
       />
-      <View style={{ flex: 1 }}>
-        <RootNavigator />
-        <ToastProvider />
-      </View>
-    </>
+      <ErrorBoundary>
+        <View style={{ flex: 1, backgroundColor: colors.background.DEFAULT }}>
+          <RootNavigator />
+          <Toast config={toastConfig ?? undefined} position="top" topOffset={60} visibilityTime={4000} />
+        </View>
+      </ErrorBoundary>
+    </BottomSheetModalProvider>
   );
 }
 
 export default function App() {
   const [queryClient] = useState(() => new QueryClient());
 
-  useEffect(() => {
-    I18nManager.forceRTL(true);
-    I18nManager.allowRTL(true);
-  }, []);
-
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#FAFAFA' }}>
       <QueryClientProvider client={queryClient}>
         <SafeAreaProvider>
           <ThemeProvider>

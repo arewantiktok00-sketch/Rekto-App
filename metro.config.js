@@ -1,8 +1,16 @@
-const { getDefaultConfig } = require('expo/metro-config');
+const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
+const path = require('path');
 
-const config = getDefaultConfig(__dirname);
+// Project root = where this config lives. No Expo; pure React Native CLI.
+const projectRoot = __dirname;
 
-// Avoid Metro watching native build output folders on Windows.
-config.resolver.blockList = /.*[\\/]+android[\\/]+build[\\/]+.*|.*[\\/]+android[\\/]+\.cxx[\\/]+.*|.*[\\/]+android[\\/]+build[\\/]+intermediates[\\/]+.*/;
+const config = {
+  projectRoot,
+  watchFolders: [projectRoot],
+  resolver: {
+    nodeModulesPaths: [path.resolve(projectRoot, 'node_modules')],
+    blockList: /.*[\\/]+android[\\/]+build[\\/]+.*|.*[\\/]+android[\\/]+\.cxx[\\/]+.*|.*[\\/]+android[\\/]+build[\\/]+intermediates[\\/]+.*/,
+  },
+};
 
-module.exports = config;
+module.exports = mergeConfig(getDefaultConfig(projectRoot), config);

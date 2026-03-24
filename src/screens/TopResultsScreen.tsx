@@ -1,9 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, StyleSheet, ScrollView, TouchableOpacity, Linking, InteractionManager } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { Image } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Trophy, Eye, Target, DollarSign, ExternalLink, ChevronDown, ChevronUp, ChevronLeft } from 'lucide-react-native';
+import { Trophy, Eye, Target, DollarSign, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react-native';
+import Ionicons from 'react-native-vector-icons/Ionicons';
+import { BackButton } from '@/components/common/BackButton';
 import { Text } from '@/components/common/Text';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -11,7 +14,7 @@ import { useRemoteConfig } from '@/contexts/RemoteConfigContext';
 import { supabase } from '@/integrations/supabase/client';
 import { getCached, setCached } from '@/services/globalCache';
 import { getFontFamily, getNumberFontFamily } from '@/utils/getFontFamily';
-import { isRTL, rtlText, ltrNumber, rtlRow, rtlIcon } from '@/utils/rtl';
+import { isRTL, rtlText, ltrNumber, rtlRow } from '@/utils/rtl';
 import { useAppSettingsRealtime } from '@/hooks/useAppSettingsRealtime';
 
 interface RankedCampaign {
@@ -39,13 +42,14 @@ export const TopResultsScreen: React.FC = () => {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { t, language } = useLanguage();
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const rtl = isRTL(language);
   const styles = useMemo(() => createStyles(colors, rtl, language), [colors, rtl, language]);
+  const headerFgColor = colors.foreground?.DEFAULT ?? (isDark ? '#FAFAFA' : '#18181B');
 
   const [months, setMonths] = useState<MonthData[]>(() => getCached<MonthData[]>('top_results_months', []));
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const { settings: config } = useRemoteConfig();
+  const { settings: config, isPaymentsHidden } = useRemoteConfig();
   const lastFetchRef = useRef(0);
   const MIN_FETCH_INTERVAL = 2000;
 
@@ -120,6 +124,12 @@ export const TopResultsScreen: React.FC = () => {
     });
   }, [fetchRankedCampaigns]);
 
+  useFocusEffect(
+    useCallback(() => {
+      fetchRankedCampaigns();
+    }, [fetchRankedCampaigns])
+  );
+
   const topResultsEnabled = config?.features?.featured_story_enabled ?? true;
 
   const formatNumber = (num?: number | null) => {
@@ -151,20 +161,14 @@ export const TopResultsScreen: React.FC = () => {
   const titleFont = getFontFamily(language as 'ckb' | 'ar', 'semibold');
   const HeaderRow = () => (
     <View style={styles.headerRow}>
-      <TouchableOpacity
-        style={styles.backButton}
-        onPress={() => navigation.goBack()}
-        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-      >
-        <ChevronLeft
-          size={20}
-          color="#18181B"
-          style={rtlIcon(rtl)}
-        />
-      </TouchableOpacity>
+      <BackButton onPress={() => navigation.goBack()} color={headerFgColor} style={styles.backButton} />
       <View style={styles.headerTitleCenter}>
         <Text
-          style={[styles.headerTitleText, { fontFamily: titleFont }, rtlText(rtl)]}
+          style={[
+            styles.headerTitleText,
+            { fontFamily: titleFont, color: headerFgColor },
+            rtlText(rtl),
+          ]}
           numberOfLines={1}
         >
           {headerTitle}
@@ -259,21 +263,23 @@ export const TopResultsScreen: React.FC = () => {
                     <Text style={[styles.metricLabel, rtlText(rtl)]}>{t('conversions') || 'Conversions'}</Text>
                     <Text style={[styles.metricValue, styles.numberLTR]}>{formatNumber(campaign.leads)}</Text>
                   </View>
-                  <View style={styles.metricBox}>
-                    <DollarSign size={16} color="#7C3AED" />
-                    <Text style={[styles.metricLabel, rtlText(rtl)]}>
-                      {campaign.show_conversions
-                        ? t('costPerConv') || 'Cost/Conv'
-                        : t('costPer1KViews') || 'Cost/1K'}
-                    </Text>
-                    <Text style={[styles.metricValuePurple, styles.numberLTR]}>
-                      {campaign.show_conversions
-                        ? `$${Number(campaign.cost_per_conversion || 0).toFixed(2)}`
-                        : Number(campaign.views || 0) > 0
-                        ? `$${((Number(campaign.spend || 0) / Number(campaign.views || 1)) * 1000).toFixed(2)}`
-                        : '$0.00'}
-                    </Text>
-                  </View>
+                  {!isPaymentsHidden && (
+                    <View style={styles.metricBox}>
+                      <DollarSign size={16} color="#7C3AED" />
+                      <Text style={[styles.metricLabel, rtlText(rtl)]}>
+                        {campaign.show_conversions
+                          ? t('costPerConv') || 'Cost/Conv'
+                          : t('costPer1KViews') || 'Cost/1K'}
+                      </Text>
+                      <Text style={[styles.metricValuePurple, styles.numberLTR]}>
+                        {campaign.show_conversions
+                          ? `$${Number(campaign.cost_per_conversion || 0).toFixed(2)}`
+                          : Number(campaign.views || 0) > 0
+                          ? `$${((Number(campaign.spend || 0) / Number(campaign.views || 1)) * 1000).toFixed(2)}`
+                          : '$0.00'}
+                      </Text>
+                    </View>
+                  )}
                 </View>
               </View>
 
@@ -281,31 +287,33 @@ export const TopResultsScreen: React.FC = () => {
                 const hasVideoLink =
                   isValidTikTokUrl(campaign.tiktok_public_url) || !!campaign.video_url;
                 return (
-                  <TouchableOpacity
-                    style={[styles.viewVideoButton, !hasVideoLink && styles.viewVideoButtonDisabled]}
-                onPress={async () => {
-                  const publicUrl = campaign.tiktok_public_url || null;
-                  const directUrl = campaign.video_url || null;
-                  let url = isValidTikTokUrl(publicUrl) ? publicUrl : null;
-                  if (!url && isValidTikTokUrl(directUrl)) {
-                    url = directUrl;
-                  }
-                  if (!url && campaign.id) {
-                    url = await resolveLegacyVideoUrl(campaign.id);
-                  }
-                  if (!url) return;
-                  await Linking.openURL(url);
-                }}
-                activeOpacity={0.8}
-                    disabled={!hasVideoLink}
-              >
-                    <ExternalLink size={16} color={hasVideoLink ? '#7C3AED' : '#9CA3AF'} />
-                    <Text style={[styles.viewVideoText, rtlText(rtl), !hasVideoLink && styles.viewVideoTextDisabled]}>
-                      {campaign.show_conversions
-                        ? t('viewVideo') || 'View Video'
-                        : t('view') || 'View'}
-                </Text>
-              </TouchableOpacity>
+                  !isPaymentsHidden ? (
+                    <TouchableOpacity
+                      style={[styles.viewVideoButton, !hasVideoLink && styles.viewVideoButtonDisabled]}
+                      onPress={async () => {
+                        const publicUrl = campaign.tiktok_public_url || null;
+                        const directUrl = campaign.video_url || null;
+                        let url = isValidTikTokUrl(publicUrl) ? publicUrl : null;
+                        if (!url && isValidTikTokUrl(directUrl)) {
+                          url = directUrl;
+                        }
+                        if (!url && campaign.id) {
+                          url = await resolveLegacyVideoUrl(campaign.id);
+                        }
+                        if (!url) return;
+                        await Linking.openURL(url);
+                      }}
+                      activeOpacity={0.8}
+                      disabled={!hasVideoLink}
+                    >
+                      <ExternalLink size={16} color={hasVideoLink ? '#7C3AED' : '#9CA3AF'} />
+                      <Text style={[styles.viewVideoText, rtlText(rtl), !hasVideoLink && styles.viewVideoTextDisabled]}>
+                        {campaign.show_conversions
+                          ? t('viewVideo') || 'View Video'
+                          : t('view') || 'View'}
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null
                 );
               })()}
 
@@ -315,18 +323,20 @@ export const TopResultsScreen: React.FC = () => {
               >
                 <Text style={[styles.moreInfoText, rtlText(rtl)]}>{t('moreInfo') || 'More Info'}</Text>
                 {expandedId === campaign.id ? (
-                  <ChevronUp size={18} color="#7C3AED" style={rtlIcon(rtl)} />
+                  <ChevronUp size={18} color="#7C3AED" />
                 ) : (
-                  <ChevronDown size={18} color="#7C3AED" style={rtlIcon(rtl)} />
+                  <ChevronDown size={18} color="#7C3AED" />
                 )}
               </TouchableOpacity>
 
               {expandedId === campaign.id && (
                 <View style={styles.moreInfoContent}>
-                  <View style={styles.infoBox}>
-                    <Text style={[styles.infoLabel, rtlText(rtl)]}>{t('totalSpend') || 'Total Spend'}</Text>
-                    <Text style={[styles.infoValueNumber, styles.numberLTR]}>${Number(campaign.spend || 0).toFixed(2)}</Text>
-                  </View>
+                  {!isPaymentsHidden && (
+                    <View style={styles.infoBox}>
+                      <Text style={[styles.infoLabel, rtlText(rtl)]}>{t('totalSpend') || 'Total Spend'}</Text>
+                      <Text style={[styles.infoValueNumber, styles.numberLTR]}>${Number(campaign.spend || 0).toFixed(2)}</Text>
+                    </View>
+                  )}
                   <View style={styles.infoBox}>
                     <Text style={[styles.infoLabel, rtlText(rtl)]}>{t('objective') || 'Objective'}</Text>
                     <Text style={[styles.infoValue, rtlText(rtl)]}>{getObjectiveLabel(campaign.objective)}</Text>
@@ -360,25 +370,32 @@ const createStyles = (colors: any, rtl: boolean, language: 'ckb' | 'ar') => {
     container: { flex: 1, backgroundColor: colors.background.DEFAULT },
     header: {
       flexDirection: 'row',
-      backgroundColor: colors.card.background,
+      alignItems: 'center',
+      backgroundColor: colors.card?.background ?? colors.background?.DEFAULT ?? '#FFFFFF',
       borderBottomWidth: 1,
-      borderBottomColor: colors.border.DEFAULT,
+      borderBottomColor: colors.border?.DEFAULT ?? '#E5E7EB',
       paddingStart: 16,
       paddingEnd: 16,
       paddingBottom: 12,
+      paddingTop: 12,
       width: '100%',
+      minHeight: 56,
     },
     headerRow: {
-      flexDirection: 'row',
+      flexDirection: rtl ? 'row-reverse' : 'row',
       alignItems: 'center',
       height: 56,
+      width: '100%',
     },
     backButton: {
       width: 40,
       height: 40,
+      minWidth: 40,
+      minHeight: 40,
       borderRadius: 12,
       borderWidth: 1.5,
-      borderColor: colors.border.DEFAULT,
+      borderColor: colors.border?.DEFAULT ?? '#E4E4E7',
+      backgroundColor: 'transparent',
       alignItems: 'center',
       justifyContent: 'center',
     },
@@ -391,7 +408,7 @@ const createStyles = (colors: any, rtl: boolean, language: 'ckb' | 'ar') => {
       fontSize: 18,
       fontWeight: '600',
       textAlign: 'center',
-      color: colors.foreground.DEFAULT,
+      color: colors.foreground?.DEFAULT ?? '#18181B',
     },
     headerSpacer: { width: 40 },
     scroll: { flex: 1 },

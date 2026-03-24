@@ -11,20 +11,17 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Megaphone, Send, Bell, Users, CheckCircle, History } from 'lucide-react-native';
-import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { supabase } from '@/integrations/supabase/client';
 import { getOwnerColors } from '@/theme/colors';
 import { getTypographyStyles } from '@/theme/typography';
 import { spacing, borderRadius } from '@/theme/spacing';
 import { inputStyleRTL } from '@/utils/rtl';
 import type { BroadcastHistory, BroadcastStats, BroadcastSendResult } from '@/types/broadcast';
-
-const SUPABASE_URL = 'https://uivgyexyakfincwgghgh.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVpdmd5ZXh5YWtmaW5jd2dnaGdoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3MTY4MDYsImV4cCI6MjA4MzI5MjgwNn0.Crz4L5Sbev3Jft6ou1SFz7htpWSWRxVaTaYgDE2DGso';
+import { toast } from '@/utils/toast';
 
 export function BroadcastScreen() {
   const insets = useSafeAreaInsets();
-  const { session } = useAuth();
   const { t, language } = useLanguage();
   const colors = getOwnerColors();
   const typography = getTypographyStyles(language as 'ckb' | 'ar');
@@ -43,32 +40,13 @@ export function BroadcastScreen() {
     fetchHistory();
   }, []);
 
-  const getHeaders = () => {
-    return {
-      'Content-Type': 'application/json',
-      'apikey': SUPABASE_ANON_KEY,
-      'Authorization': `Bearer ${session?.access_token || ''}`,
-    };
-  };
-
   const fetchStats = async () => {
     setLoadingCount(true);
     try {
-      const response = await fetch(`${SUPABASE_URL}/functions/v1/owner-content`, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify({ type: 'broadcast', action: 'stats' }),
+      const { data, error } = await supabase.functions.invoke('owner-content', {
+        body: { type: 'broadcast', action: 'stats' },
       });
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          Alert.alert(t('error') || 'Error', t('unauthorized') || 'Unauthorized. Please log in again.');
-          return;
-        }
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const data = await response.json();
+      if (error) throw error;
       setUserCount(data.userCount || 0);
     } catch (err) {
       console.error('[Broadcast] Failed to fetch stats:', err);
@@ -82,20 +60,10 @@ export function BroadcastScreen() {
   const fetchHistory = async () => {
     setLoadingHistory(true);
     try {
-      const response = await fetch(`${SUPABASE_URL}/functions/v1/owner-content`, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify({ type: 'broadcast', action: 'history' }),
+      const { data, error } = await supabase.functions.invoke('owner-content', {
+        body: { type: 'broadcast', action: 'history' },
       });
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          return;
-        }
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const data = await response.json();
+      if (error) throw error;
       setHistory(data.broadcasts || []);
     } catch (err) {
       console.error('[Broadcast] Failed to fetch history:', err);
@@ -137,30 +105,15 @@ export function BroadcastScreen() {
           onPress: async () => {
             setSending(true);
             try {
-              const response = await fetch(`${SUPABASE_URL}/functions/v1/owner-content`, {
-                method: 'POST',
-                headers: getHeaders(),
-                body: JSON.stringify({
+              const { data, error } = await supabase.functions.invoke('owner-content', {
+                body: {
                   type: 'broadcast',
                   action: 'send',
                   data: { title: title.trim(), message: message.trim() },
-                }),
+                },
               });
-
-              if (!response.ok) {
-                if (response.status === 401) {
-                  Alert.alert(t('error') || 'Error', t('unauthorized') || 'Unauthorized. Please log in again.');
-                  return;
-                }
-                if (response.status === 403) {
-                  Alert.alert(t('error') || 'Error', t('notAuthorized') || 'You are not authorized to send broadcasts');
-                  return;
-                }
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.error || `HTTP ${response.status}`);
-              }
-
-              const result: BroadcastSendResult = await response.json();
+              if (error) throw error;
+              const result: BroadcastSendResult = data;
 
               if (result.success) {
                 Alert.alert(
@@ -176,7 +129,7 @@ export function BroadcastScreen() {
               }
             } catch (err: any) {
               console.error('[Broadcast] Send error:', err);
-              Alert.alert(t('error') || 'Error', err.message || t('failedToSend') || 'Failed to send broadcast notification');
+              toast.error(t('error'), t('somethingWentWrong'));
             } finally {
               setSending(false);
             }
@@ -189,13 +142,12 @@ export function BroadcastScreen() {
   const formatDate = (dateString: string): string => {
     try {
       const date = new Date(dateString);
-      return date.toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-      });
+      const d = String(date.getDate()).padStart(2, '0');
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const y = date.getFullYear();
+      const h = String(date.getHours()).padStart(2, '0');
+      const min = String(date.getMinutes()).padStart(2, '0');
+      return `${d}/${m}/${y} ${h}:${min}`;
     } catch {
       return dateString;
     }

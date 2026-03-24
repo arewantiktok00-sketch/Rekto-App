@@ -8,11 +8,13 @@ import { supabaseRead } from '@/integrations/supabase/client';
 import { FileText } from 'lucide-react-native';
 import { useTheme } from '@/contexts/ThemeContext';
 import { spacing, borderRadius } from '@/theme/spacing';
-import { format } from 'date-fns';
 import { Text } from '@/components/common/Text';
+import { getDisplayBudget } from '@/utils/campaignBudget';
+import { formatUSDLatinDigitsOnly } from '@/utils/currency';
+import { formatDateNumericDMY } from '@/utils/dateFormat';
 import { ScreenHeader } from '@/components/common/ScreenHeader';
 
-export function InvoiceHistory() {
+export function InvoiceHistory(props: { embedded?: boolean } = { embedded: false }) {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
@@ -34,7 +36,7 @@ export function InvoiceHistory() {
     try {
       const { data, error } = await supabaseRead
         .from('campaigns')
-        .select('id, title, total_budget, created_at, status')
+        .select('id, title, total_budget, target_spend, real_budget, created_at, status')
         .eq('user_id', user.id)
         .eq('status', 'completed')
         .order('created_at', { ascending: false });
@@ -48,17 +50,21 @@ export function InvoiceHistory() {
     }
   };
 
+  const embedded = Boolean((props as any)?.embedded);
+
   return (
     <View style={styles.container}>
-      <ScreenHeader
-        title={t('invoices')}
-        onBack={() => navigation.goBack()}
-        style={{ paddingTop: insets.top + 8 }}
-      />
+      {!embedded && (
+        <ScreenHeader
+          title={t('invoices')}
+          onBack={() => navigation.goBack()}
+          style={{ paddingTop: insets.top + 8 }}
+        />
+      )}
 
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: 40 }}
+        contentContainerStyle={{ paddingBottom: embedded ? 0 : 40 }}
         showsVerticalScrollIndicator={false}
       >
         <View style={{ paddingHorizontal: 16, width: '100%' }}>
@@ -70,25 +76,29 @@ export function InvoiceHistory() {
         {invoices.length === 0 ? (
           <View style={styles.emptyState}>
             <FileText size={48} color={colors.foreground.muted} />
-            <Text style={[styles.emptyText, isRTL && styles.textRTL]}>{t('noInvoicesYet') || 'No invoices yet'}</Text>
+            <Text style={[styles.emptyText, isRTL && styles.textRTL]}>
+              {language === 'ar' ? 'لا توجد فواتير بعد' : 'هیچ پسوولەیەک نییە'}
+            </Text>
           </View>
         ) : (
           invoices.map((invoice) => (
             <TouchableOpacity
               key={invoice.id}
-              style={[styles.invoiceCard, isRTL && styles.rowReverse]}
+              style={styles.invoiceCard}
               onPress={() => navigation.navigate('Invoice', { id: invoice.id })}
             >
-              <View style={[styles.invoiceLeft, isRTL && styles.rowReverse]}>
+              <View style={styles.invoiceLeft}>
                 <FileText size={24} color={colors.primary.DEFAULT} />
                 <View style={styles.invoiceInfo}>
                   <Text style={[styles.invoiceTitle, isRTL && styles.textRTL]} numberOfLines={1} ellipsizeMode="tail">{invoice.title}</Text>
                   <Text style={[styles.invoiceDate, isRTL && styles.textRTL]}>
-                    {format(new Date(invoice.created_at), 'MMM dd, yyyy')}
+                    {formatDateNumericDMY(new Date(invoice.created_at))}
                   </Text>
                 </View>
               </View>
-              <Text style={[styles.invoiceAmount, isRTL && styles.textRTL]}>${invoice.total_budget.toFixed(2)}</Text>
+              <Text style={[styles.invoiceAmount, isRTL && styles.textRTL]}>
+                {formatUSDLatinDigitsOnly(getDisplayBudget(invoice))}
+              </Text>
             </TouchableOpacity>
           ))
         )}
@@ -126,15 +136,12 @@ const createStyles = (colors: any, insets: { top: number; bottom: number }, isRT
   headerLeftSlot: {
     minWidth: 100,
     maxWidth: 100,
-    alignItems: isRTL ? 'flex-end' : 'flex-start',
+    alignItems: 'flex-start',
     justifyContent: 'center',
   },
   headerRightSlot: {
     minWidth: 100,
     maxWidth: 100,
-  },
-  rowReverse: {
-    flexDirection: 'row',
   },
   textRTL: {
     textAlign: 'right',

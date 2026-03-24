@@ -1,19 +1,15 @@
 /**
  * Supabase Edge Function: send-onesignal-push
  *
- * Reusable backend: send_push_notification(user_id(s), title, message, data).
- * - Fetches OneSignal player_id from notification_preferences.
- * - Calls OneSignal REST API to deliver push.
+ * Sends push to users by external_user_id (Supabase user.id).
+ * Uses OneSignal include_aliases.external_id — app must set setExternalUserId(userId) after login.
  *
  * Set in Supabase Dashboard → Edge Functions → Secrets:
  *   ONESIGNAL_REST_API_KEY
  *   ONESIGNAL_APP_ID
- *
- * Invoke from client or other functions after creating in-app notification.
  */
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const ONESIGNAL_URL = 'https://api.onesignal.com/notifications';
 
@@ -24,13 +20,6 @@ interface ReqBody {
   body: string;
   type?: string;
   data?: Record<string, unknown>;
-}
-
-interface PushSub {
-  player_id?: string;
-  token?: string;
-  type?: string;
-  platform?: string;
 }
 
 serve(async (req) => {
@@ -61,36 +50,11 @@ serve(async (req) => {
       return json({ error: 'external_user_ids or user_id and title required' }, 400, cors());
     }
 
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-    const { data: rows, error: fetchError } = await supabase
-      .from('notification_preferences')
-      .select('user_id, push_subscription')
-      .in('user_id', userIds)
-      .eq('push_enabled', true);
-
-    if (fetchError) {
-      console.error('DB error fetching player_ids:', fetchError);
-      return json({ error: 'Failed to resolve recipients' }, 500, cors());
-    }
-
-    const playerIds: string[] = [];
-    (rows || []).forEach((row: { push_subscription?: PushSub | null }) => {
-      const sub = row.push_subscription as PushSub | null | undefined;
-      if (sub && typeof sub === 'object' && sub.player_id) {
-        playerIds.push(sub.player_id);
-      }
-    });
-
-    if (playerIds.length === 0) {
-      return json({ sent: 0, message: 'No push subscriptions found for users' }, 200, cors());
-    }
-
+    // Send to users by external_user_id (Supabase user.id) — no player_id lookup needed
     const payload = {
       app_id: appId,
-      include_player_ids: playerIds,
+      include_aliases: { external_id: userIds },
+      target_channel: 'push',
       headings: { en: title },
       contents: { en: message },
       data: {
@@ -122,7 +86,7 @@ serve(async (req) => {
     return json(
       {
         success: true,
-        sent: playerIds.length,
+        sent: userIds.length,
         id: result.id,
       },
       200,

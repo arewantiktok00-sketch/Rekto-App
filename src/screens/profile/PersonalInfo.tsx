@@ -1,19 +1,20 @@
-import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, TextInput, TouchableOpacity, ActivityIndicator, Platform, KeyboardAvoidingView } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ScreenHeader } from '@/components/common/ScreenHeader';
+import { Text } from '@/components/common/Text';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { isRTL, rtlText, rtlRow, rtlInput } from '@/utils/rtl';
-import { supabase, supabaseRead } from '@/integrations/supabase/client';
-import { User, Mail, Phone, Check } from 'lucide-react-native';
 import { useTheme } from '@/contexts/ThemeContext';
-import { LinearGradient } from 'expo-linear-gradient';
-import { spacing, borderRadius } from '@/theme/spacing';
-import { getTypographyStyles, getFontFamily } from '@/theme/typography';
+import { supabase, supabaseRead } from '@/integrations/supabase/client';
+import { borderRadius, spacing } from '@/theme/spacing';
+import { getFontFamily, getTypographyStyles } from '@/theme/typography';
+import { getAvatarGradient } from '@/utils/avatar';
+import { isRTL, rtlInput, rtlRow, rtlText } from '@/utils/rtl';
 import { toast } from '@/utils/toast';
-import { Text } from '@/components/common/Text';
-import { ScreenHeader } from '@/components/common/ScreenHeader';
+import { useNavigation } from '@react-navigation/native';
+import { Check, Mail, Phone, User } from 'lucide-react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export function PersonalInfo() {
   const navigation = useNavigation();
@@ -24,7 +25,6 @@ export function PersonalInfo() {
   const { colors } = useTheme();
   const typography = getTypographyStyles(language as 'ckb' | 'ar');
   const fontFamily = getFontFamily(language as 'ckb' | 'ar');
-  const styles = createStyles(colors, insets, typography, fontFamily, rtl);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [fullName, setFullName] = useState('');
@@ -32,6 +32,11 @@ export function PersonalInfo() {
   const [profileEmail, setProfileEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [originalData, setOriginalData] = useState({ fullName: '', email: '', phone: '' });
+  const styles = createStyles(colors, insets, typography, fontFamily, rtl);
+  const avatarGradient = useMemo(
+    () => getAvatarGradient(user?.id, fullName || user?.user_metadata?.full_name),
+    [user?.id, fullName, user?.user_metadata?.full_name]
+  );
 
   useEffect(() => {
     if (!user) {
@@ -110,9 +115,9 @@ export function PersonalInfo() {
       if (error) throw error;
 
       setOriginalData({ fullName, email, phone });
-      toast.success('Saved', 'Profile updated');
+      toast.success(t('saved') || t('success'), t('profileUpdated'));
     } catch (error: any) {
-      toast.error('Error', error.message || 'Failed to save profile');
+      toast.error(t('error'), t('failedToSaveProfile'));
     } finally {
       setSaving(false);
     }
@@ -137,48 +142,53 @@ export function PersonalInfo() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={{ paddingHorizontal: 16, width: '100%' }}>
-        {/* Avatar circle */}
+        {/* Avatar circle - same gradient as Profile */}
         <View style={styles.avatarContainer}>
-          <View style={styles.avatarCircle}>
+          <LinearGradient
+            colors={avatarGradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.avatarCircle}
+          >
             <Text style={styles.avatarInitial}>
               {fullName?.trim()[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || 'A'}
             </Text>
-          </View>
+          </LinearGradient>
         </View>
 
         <View style={styles.formCard}>
           <View style={styles.section}>
-            <Text style={[styles.fieldLabel, rtlText(rtl)]}>{t('fullName') || 'Full Name'}</Text>
-            <View style={[styles.inputWrapper, rtlRow(rtl)]}>
+            <Text style={[styles.fieldLabel, styles.labelRtl]}>{t('fullName') || 'Full Name'}</Text>
+            <View style={styles.inputWrapper}>
               <User size={18} color={colors.foreground.muted} />
             <TextInput
-              style={[styles.input, rtlInput(rtl)]}
+              style={[styles.input, styles.inputRtl]}
               value={fullName}
               onChangeText={setFullName}
-                placeholder="Arewan"
+              placeholder={t('fullName') || 'Full Name'}
               placeholderTextColor={colors.foreground.muted}
             />
             </View>
           </View>
 
           <View style={styles.section}>
-            <Text style={[styles.fieldLabel, rtlText(rtl)]}>{t('emailAddress') || 'Email Address'}</Text>
-            <View style={[styles.readOnlyWrapper, rtlRow(rtl)]}>
+            <Text style={[styles.fieldLabel, styles.labelRtl]}>{t('emailAddress') || 'Email Address'}</Text>
+            <View style={styles.readOnlyWrapper}>
               <Mail size={18} color={colors.foreground.muted} />
-              <Text style={[styles.readOnlyValue, rtlText(rtl)]}>
+              <Text style={[styles.readOnlyValue, styles.labelRtl]}>
                 {email?.includes('@rekto.phone') || !email ? (t('phoneAccount') || 'Phone Account') : email || '-'}
               </Text>
             </View>
-            <Text style={[styles.hint, rtlText(rtl)]}>{t('emailCannotBeChanged') || 'Email address cannot be changed'}</Text>
+            <Text style={[styles.hint, styles.hintRtl]}>{t('emailCannotBeChanged') || 'Email address cannot be changed'}</Text>
           </View>
 
           <View style={styles.section}>
-            <Text style={[styles.fieldLabel, rtlText(rtl)]}>{t('phoneNumber') || 'Phone Number'}</Text>
-            <View style={[styles.readOnlyWrapper, rtlRow(rtl)]}>
+            <Text style={[styles.fieldLabel, styles.labelRtl]}>{t('phoneNumber') || 'Phone Number'}</Text>
+            <View style={styles.readOnlyWrapper}>
               <Phone size={18} color={colors.foreground.muted} />
-              <Text style={[styles.readOnlyValue, rtlText(rtl)]}>{phone || '-'}</Text>
+              <Text style={[styles.readOnlyValue, styles.labelRtl]}>{phone || '-'}</Text>
             </View>
-            <Text style={[styles.hint, rtlText(rtl)]}>{t('phoneCannotBeChanged') || 'Phone number cannot be changed'}</Text>
+            <Text style={[styles.hint, styles.hintRtl]}>{t('phoneCannotBeChanged') || 'Phone number cannot be changed'}</Text>
           </View>
         </View>
 
@@ -196,11 +206,11 @@ export function PersonalInfo() {
             {saving ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <View style={[styles.saveButtonContent, rtlRow(rtl)]}>
+              <View style={styles.saveButtonContent}>
                 <View style={styles.saveButtonIconWrapper}>
                   <Check size={16} color={colors.primary.foreground} />
                 </View>
-                <Text style={[styles.saveButtonText, rtlText(rtl)]}>{t('saveChanges') || 'Save Changes'}</Text>
+                <Text style={[styles.saveButtonText, styles.labelRtl]}>{t('saveChanges') || 'Save Changes'}</Text>
               </View>
             )}
           </LinearGradient>
@@ -221,9 +231,6 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  rowReverse: {
-    flexDirection: 'row',
   },
   textRTL: {
     textAlign: 'right',
@@ -247,14 +254,26 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     width: 88,
     height: 88,
     borderRadius: 44,
-    backgroundColor: colors.primary.DEFAULT,
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarInitial: {
     ...typography.h1,
     fontSize: 32,
-    color: colors.primary.foreground,
+    color: '#FFFFFF',
+  },
+  labelRtl: {
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  hintRtl: {
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
+  inputRtl: {
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
   formCard: {
     width: '100%',
@@ -278,10 +297,12 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     fontWeight: '600',
     color: colors.foreground.DEFAULT,
     marginBottom: 8,
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
   inputWrapper: {
     width: '100%',
-    flexDirection: 'row',
+    flexDirection: (rtl ? 'row-reverse' : 'row') as 'row' | 'row-reverse',
     alignItems: 'center',
     minHeight: 48,
     backgroundColor: colors.input.background || '#F3F4F6',
@@ -296,7 +317,7 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
   },
   readOnlyWrapper: {
     width: '100%',
-    flexDirection: 'row',
+    flexDirection: (rtl ? 'row-reverse' : 'row') as 'row' | 'row-reverse',
     alignItems: 'center',
     minHeight: 48,
     backgroundColor: colors.background.secondary || '#F3F4F6',
@@ -320,6 +341,8 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     fontSize: 16,
     color: colors.foreground.DEFAULT,
     paddingVertical: 0,
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
   inputDisabled: {
     color: colors.foreground.muted,
@@ -329,6 +352,8 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     fontSize: 13,
     color: colors.foreground.muted,
     marginTop: 6,
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
   saveButtonContainer: {
     width: '100%',
@@ -341,7 +366,7 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     justifyContent: 'center',
   },
   saveButtonContent: {
-    flexDirection: 'row',
+    flexDirection: (rtl ? 'row-reverse' : 'row') as 'row' | 'row-reverse',
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,

@@ -38,18 +38,19 @@ export const getFontFamily = (
 
 /**
  * Get font family for numbers
- * Numbers ALWAYS use Poppins, regardless of language
+ * Numbers ALWAYS use Poppins (default Poppins-Medium per design)
  */
-export const getNumberFontFamily = (weight: FontWeight = 'regular'): string => {
+export const getNumberFontFamily = (weight: FontWeight = 'medium'): string => {
   switch (weight) {
     case 'bold':
       return fonts.bold;
     case 'semibold':
       return fonts.semibold;
-    case 'medium':
-      return fonts.medium;
-    default:
+    case 'regular':
       return fonts.regular;
+    case 'medium':
+    default:
+      return fonts.medium;
   }
 };
 

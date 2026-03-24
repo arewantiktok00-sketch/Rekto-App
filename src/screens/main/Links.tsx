@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { View, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
+import LinearGradient from 'react-native-linear-gradient';
 import { Plus, Link2, Sparkles, AlertCircle } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -52,7 +52,7 @@ export function Links() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  const { settings: config } = useRemoteConfig();
+  const { settings: config, isFeatureEnabled } = useRemoteConfig();
   const { t, language } = useLanguage();
   const rtl = isRTL(language);
   const { colors } = useTheme();
@@ -80,6 +80,23 @@ export function Links() {
   const displayName = userName || user?.email?.split('@')[0] || (rtl ? 'بەکارهێنەر' : 'User');
   // Check if links feature is disabled
   const isDisabled = config && !config.features?.links_enabled;
+  useEffect(() => {
+    if (!isFeatureEnabled('links_enabled')) {
+      const goToSafeScreen = () => {
+        const nav = navigation as any;
+        if (typeof nav.canGoBack === 'function' && nav.canGoBack()) {
+          nav.goBack();
+          return;
+        }
+        nav.navigate('Dashboard');
+      };
+      Alert.alert(
+        t('featureDisabledTitle'),
+        t('linksDisabled'),
+        [{ text: t('done'), onPress: goToSafeScreen }]
+      );
+    }
+  }, [isFeatureEnabled, navigation, t]);
   const [creating, setCreating] = useState(false);
   const queryKey = ['user-links', user?.id];
 
@@ -258,7 +275,7 @@ export function Links() {
       } else {
         console.error('Error fetching links:', error);
       }
-      toast.error('Error', 'Failed to load links');
+      // Keep background/focus/poll refresh silent (no toast noise).
       return { links: [], socialMap: {} };
     }
   }, [user?.id, verifyLinksInBackground]);
@@ -274,9 +291,10 @@ export function Links() {
     initialDataUpdatedAt: cachedLinks.length > 0 ? Date.now() : undefined,
     staleTime: 60000,
     gcTime: 300000,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false,
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
     refetchOnReconnect: true,
+    refetchInterval: 120000,
     retry: 1,
     retryDelay: 1000,
   });
@@ -320,13 +338,15 @@ export function Links() {
 
       if (error) throw error;
 
+      const safeSlug = generatedSlug || data.slug || data.id;
+
       await supabase
         .from('link_social_data')
         .insert({
           user_id: user.id,
           link_id: data.id,
-          slug: generatedSlug,
-          display_name: generatedSlug,
+          slug: safeSlug,
+          display_name: safeSlug,
           sync_status: 'pending',
         });
 
@@ -394,7 +414,7 @@ export function Links() {
     } catch (error: any) {
       toast.error(
         t('generalError') || 'Error',
-        error.message || t('linkCreateFailed') || 'Failed to create link'
+        t('linkCreateFailed')
       );
     } finally {
       setCreating(false);
@@ -403,7 +423,7 @@ export function Links() {
 
   const handleRetrySync = async (link: UserLink) => {
     if (!user?.id || !link.linkmagic_email) {
-      toast.error('Error', 'Missing link identifier');
+      toast.error(t('error'), t('somethingWentWrong'));
       return;
     }
 
@@ -488,7 +508,7 @@ export function Links() {
         .eq('link_id', link.id)
         .eq('user_id', user.id);
 
-      toast.error('Error', error?.message || 'Failed to sync');
+      toast.error(t('error'), t('somethingWentWrong'));
       queryClient.invalidateQueries({ queryKey });
     }
   };
@@ -522,7 +542,7 @@ export function Links() {
                 isRTL ? 'لینکەکە سڕایەوە' : undefined
               );
             } catch (error: any) {
-              toast.error(t('error') || 'Error', error.message);
+              toast.error(t('error'), t('somethingWentWrong'));
             }
           },
         },
@@ -545,9 +565,9 @@ export function Links() {
           <View style={styles.disabledIconContainer}>
             <AlertCircle size={48} color={colors.foreground.muted} />
           </View>
-          <Text style={styles.disabledTitle}>Feature Unavailable</Text>
+          <Text style={styles.disabledTitle}>{t('featureDisabledTitle')}</Text>
           <Text style={styles.disabledMessage}>
-            Links feature is temporarily disabled. Please check back later or contact support for more information.
+            {t('linksDisabled')}
           </Text>
         </View>
       </View>

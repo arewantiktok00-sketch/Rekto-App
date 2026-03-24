@@ -1,0 +1,177 @@
+diff --git a/node_modules/react-native/Libraries/Core/Timers/JSTimers.js b/node_modules/react-native/Libraries/Core/Timers/JSTimers.js
+index 6969b0e..9d638c3 100644
+--- a/node_modules/react-native/Libraries/Core/Timers/JSTimers.js
++++ b/node_modules/react-native/Libraries/Core/Timers/JSTimers.js
+@@ -89,8 +89,23 @@ function _callTimer(timerID: number, frameTime: number, didTimeout: ?boolean) {
+ 
+   const type = types[timerIndex];
+   const callback = callbacks[timerIndex];
+-  if (!callback || !type) {
+-    console.error('No callback found for timerID ' + timerID);
++  if (!type) {
++    console.error('No callback type found for timerID ' + timerID);
++    return;
++  }
++
++  if (typeof callback !== 'function') {
++    if (__DEV__) {
++      console.warn(
++        '[JSTimers] Expected timer callback to be function but got %s for timerID %s (type: %s). Clearing timer.',
++        typeof callback,
++        String(timerID),
++        String(type),
++      );
++      console.warn('Bad timer callback value:', callback);
++    }
++    _clearIndex(timerIndex);
++    deleteTimer(timerID);
+     return;
+   }
+ 
+diff --git a/node_modules/react-native/Libraries/StyleSheet/processTransform.js b/node_modules/react-native/Libraries/StyleSheet/processTransform.js
+index d4371e2..4305b7e 100644
+--- a/node_modules/react-native/Libraries/StyleSheet/processTransform.js
++++ b/node_modules/react-native/Libraries/StyleSheet/processTransform.js
+@@ -163,8 +163,13 @@ function _validateTransform(
+   value: any | number | string,
+   transformation: any,
+ ) {
++  // Guard against undefined / non-animated values to avoid
++  // `Cannot read property 'getValue' of undefined` crashes in dev.
++  const isAnimatedValue =
++    value != null && typeof value.getValue === 'function';
++
+   invariant(
+-    !value.getValue,
++    !isAnimatedValue,
+     'You passed an Animated.Value to a normal component. ' +
+       'You need to wrap that component in an Animated. For example, ' +
+       'replace <View /> by <Animated.View />.',
+diff --git a/node_modules/react-native/scripts/cocoapods/new_architecture.rb b/node_modules/react-native/scripts/cocoapods/new_architecture.rb
+index 7d8f8e6..cf55933 100644
+--- a/node_modules/react-native/scripts/cocoapods/new_architecture.rb
++++ b/node_modules/react-native/scripts/cocoapods/new_architecture.rb
+@@ -179,8 +179,13 @@ class NewArchitectureHelper
+                 end
+                 next if should_skip
+ 
+-                # Read the file as a plist
+-                info_plist = Xcodeproj::Plist.read_from_path(infoPlistFile)
++                # Read the file as a plist (skip binary or invalid UTF-8 plists — xcodeproj raises otherwise)
++                begin
++                    info_plist = Xcodeproj::Plist.read_from_path(infoPlistFile)
++                rescue ArgumentError, StandardError
++                    next
++                end
++                next unless info_plist.is_a?(Hash)
+                 # Check if it contains the RCTNewArchEnabled key
+                 if info_plist["RCTNewArchEnabled"] and info_plist["RCTNewArchEnabled"] == new_arch_enabled
+                     next
+diff --git a/node_modules/react-native/scripts/xcode/with-environment.sh b/node_modules/react-native/scripts/xcode/with-environment.sh
+index d2ddf3c..851fb08 100755
+--- a/node_modules/react-native/scripts/xcode/with-environment.sh
++++ b/node_modules/react-native/scripts/xcode/with-environment.sh
+@@ -12,6 +12,13 @@
+ # USAGE:
+ # ./with-environment.sh command
+ 
++# Xcode run script phases often do not set HOME; Hermes/CMake and other tools (e.g. brew) require it
++if [ -z "$HOME" ]; then
++  HOME=$(eval echo ~"$(id -un 2>/dev/null)" 2>/dev/null)
++  [ -z "$HOME" ] && HOME="/tmp"
++  export HOME
++fi
++
+ # Start with a default
+ NODE_BINARY=$(command -v node || echo "")
+ export NODE_BINARY
+diff --git a/node_modules/react-native/sdks/hermes-engine/utils/build-hermes-xcode.sh b/node_modules/react-native/sdks/hermes-engine/utils/build-hermes-xcode.sh
+index b1ac920..c862793 100755
+--- a/node_modules/react-native/sdks/hermes-engine/utils/build-hermes-xcode.sh
++++ b/node_modules/react-native/sdks/hermes-engine/utils/build-hermes-xcode.sh
+@@ -6,6 +6,10 @@
+ 
+ set -x -e
+ 
++# Xcode run script phase may not set HOME; Hermes/CMake can invoke tools that require it (e.g. brew)
++export HOME="${HOME:-$(eval echo ~$(id -un 2>/dev/null) 2>/dev/null)}"
++[ -z "$HOME" ] && export HOME="/tmp"
++
+ release_version="$1"; shift
+ hermesc_path="$1"; shift
+ jsi_path="$1"; shift
+@@ -61,11 +65,19 @@ fi
+ 
+ architectures=$( echo "$ARCHS" | tr  " " ";" )
+ 
++# Fix CMake error on Xcode 16+: CMAKE_APPLE_ARCH_SYSROOTS length must match CMAKE_OSX_ARCHITECTURES (avoid duplicate sysroots)
++if [ -n "${CMAKE_APPLE_ARCH_SYSROOTS}" ] && echo "${CMAKE_APPLE_ARCH_SYSROOTS}" | grep -q ';'; then
++  export CMAKE_APPLE_ARCH_SYSROOTS="$(echo "${CMAKE_APPLE_ARCH_SYSROOTS}" | cut -d';' -f1)"
++fi
++# Force single sysroot to match single arch when building for device/simulator
++SINGLE_SYSROOT="${SDKROOT:-$(xcrun --sdk iphonesimulator --show-sdk-path)}"
++
+ echo "Configure Apple framework"
+ 
+ "$CMAKE_BINARY" \
+   -S "${PODS_ROOT}/hermes-engine" \
+   -B "${PODS_ROOT}/hermes-engine/build/${PLATFORM_NAME}" \
++  -DCMAKE_APPLE_ARCH_SYSROOTS:STRING="${SINGLE_SYSROOT}" \
+   -DHERMES_EXTRA_LINKER_FLAGS="$xcode_15_flags" \
+   -DHERMES_APPLE_TARGET_PLATFORM:STRING="$PLATFORM_NAME" \
+   -DCMAKE_OSX_ARCHITECTURES:STRING="$architectures" \
+diff --git a/node_modules/react-native/sdks/hermes-engine/utils/build-hermesc-xcode.sh b/node_modules/react-native/sdks/hermes-engine/utils/build-hermesc-xcode.sh
+index 7567ad1..1b2a5fe 100755
+--- a/node_modules/react-native/sdks/hermes-engine/utils/build-hermesc-xcode.sh
++++ b/node_modules/react-native/sdks/hermes-engine/utils/build-hermesc-xcode.sh
+@@ -6,6 +6,15 @@
+ 
+ set -x -e
+ 
++# Ensure HOME is set (Xcode script phase often leaves it unset; Hermes/CMake and brew require it)
++if [ -z "$HOME" ]; then
++  if [ -n "$USER" ] && [ -d "/Users/$USER" ]; then
++    export HOME="/Users/$USER"
++  else
++    export HOME="/tmp"
++  fi
++fi
++
+ hermesc_dir_path="$1"; shift
+ jsi_path="$1"
+ 
+@@ -15,12 +24,33 @@ jsi_path="$1"
+ # So we clean the environment with env -i, and explicitly set SDKROOT to macosx
+ SDKROOT=$(xcode-select -p)/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk
+ 
++# Fix CMake error on Xcode 16+: CMAKE_APPLE_ARCH_SYSROOTS length must match CMAKE_OSX_ARCHITECTURES (avoid duplicate sysroots)
++export CMAKE_APPLE_ARCH_SYSROOTS="$SDKROOT"
++
++# env -i strips all vars; set host arch so CMake has one arch + one sysroot (required for Apple CMake)
++HOST_ARCH=$(uname -m)
++export CMAKE_OSX_ARCHITECTURES="$HOST_ARCH"
++
++# env -i strips all vars; Xcode sets CMAKE_BINARY in the phase script — preserve it or default to system cmake
++CMAKE_BINARY="${CMAKE_BINARY:-$(command -v cmake)}"
++if [ -z "$CMAKE_BINARY" ] || [ ! -x "$CMAKE_BINARY" ]; then
++  echo "error: cmake not found. Install Xcode Command Line Tools or run: brew install cmake" 1>&2
++  exit 1
++fi
++
+ env -i \
+   PATH="$PATH" \
++  HOME="$HOME" \
+   SDKROOT="$SDKROOT" \
+-  "$CMAKE_BINARY" -S "${PODS_ROOT}/hermes-engine" -B "$hermesc_dir_path" -DJSI_DIR="$jsi_path"
++  CMAKE_APPLE_ARCH_SYSROOTS="$SDKROOT" \
++  CMAKE_OSX_ARCHITECTURES="$HOST_ARCH" \
++  CMAKE_BINARY="$CMAKE_BINARY" \
++  "$CMAKE_BINARY" -S "${PODS_ROOT}/hermes-engine" -B "$hermesc_dir_path" -DJSI_DIR="$jsi_path" -DCMAKE_APPLE_ARCH_SYSROOTS="$SDKROOT" -DCMAKE_OSX_ARCHITECTURES:STRING="$HOST_ARCH"
+ 
+ env -i \
+   PATH="$PATH" \
++  HOME="$HOME" \
+   SDKROOT="$SDKROOT" \
++  CMAKE_OSX_ARCHITECTURES="$HOST_ARCH" \
++  CMAKE_BINARY="$CMAKE_BINARY" \
+   "$CMAKE_BINARY" --build "$hermesc_dir_path" --target hermesc -j "$(sysctl -n hw.ncpu)"

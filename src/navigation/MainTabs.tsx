@@ -16,7 +16,10 @@ const Tab = createBottomTabNavigator();
 
 export default function MainTabs() {
   const { t } = useLanguage();
-  const { config } = useRemoteConfig();
+  const { isFeatureEnabled, isPaymentsHidden } = useRemoteConfig();
+  const showCampaignsTab = isFeatureEnabled('campaigns_enabled');
+  const showCreateTab = isFeatureEnabled('ad_creation_enabled') && !isPaymentsHidden;
+  const showLinksTab = isFeatureEnabled('links_enabled');
 
   return (
     <BlockedGuard>
@@ -34,30 +37,33 @@ export default function MainTabs() {
           tabBarAccessibilityLabel: t('home') || 'Home',
         }}
       />
-      {/* Show Campaigns tab always, but will show disabled state if feature is off */}
-      <Tab.Screen
-        name="Campaigns"
-        component={Campaigns}
-        options={{
-          tabBarAccessibilityLabel: t('campaigns') || 'Campaigns',
-        }}
-      />
-      {/* Show CreateAd tab always, but will show disabled state if feature is off */}
-      <Tab.Screen
-        name="CreateAd"
-        component={CreateAd}
-        options={{
-          tabBarAccessibilityLabel: t('create') || 'Create',
-        }}
-      />
-      {/* Show Links tab always, but will show disabled state if feature is off */}
-      <Tab.Screen
-        name="Links"
-        component={Links}
-        options={{
-          tabBarAccessibilityLabel: t('links') || 'Links',
-        }}
-      />
+      {showCampaignsTab && (
+        <Tab.Screen
+          name="Campaigns"
+          component={Campaigns}
+          options={{
+            tabBarAccessibilityLabel: t('campaigns') || 'Campaigns',
+          }}
+        />
+      )}
+      {showCreateTab && (
+        <Tab.Screen
+          name="CreateAd"
+          component={CreateAd}
+          options={{
+            tabBarAccessibilityLabel: t('create') || 'Create',
+          }}
+        />
+      )}
+      {showLinksTab && (
+        <Tab.Screen
+          name="Links"
+          component={Links}
+          options={{
+            tabBarAccessibilityLabel: t('links') || 'Links',
+          }}
+        />
+      )}
       <Tab.Screen
         name="Tutorial"
         component={Tutorial}

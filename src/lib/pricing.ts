@@ -3,8 +3,9 @@
  * Used for invoice calculations and currency conversions
  */
 
-// Exchange Rate: 1 USD = 1,450 IQD (use Math.floor, no rounding up)
-export const USD_TO_IQD_RATE = 1450;
+import { FALLBACK_EXCHANGE_RATE } from '@/lib/exchangeRate';
+
+// Exchange rate is dynamic (usePricingConfig / app_settings). Use Math.floor for IQD.
 
 /**
  * Calculate tax based on budget amount using FIXED LOOKUP TABLE
@@ -72,9 +73,15 @@ export function calculateTax(budgetUSD: number): number {
  * @param usdAmount - Amount in USD
  * @returns Amount in IQD (floored)
  */
-export function convertUSDToIQD(usdAmount: number): number {
-  return Math.floor(usdAmount * USD_TO_IQD_RATE);
+export function convertUSDToIQD(usdAmount: number, exchangeRate: number = FALLBACK_EXCHANGE_RATE): number {
+  return Math.floor(usdAmount * exchangeRate);
 }
+
+/**
+ * Budget slider values: [10, 20, 21, 22, ..., 100] — total 82 values.
+ * Slider maps index 0..81 to dollar values. Used in Create Ad budget slider.
+ */
+export const BUDGET_SLIDER_VALUES: number[] = [10, 20, ...Array.from({ length: 80 }, (_, i) => 21 + i)];
 
 /**
  * Minimum budget for ad extensions (USD)
@@ -84,12 +91,12 @@ export const MIN_EXTENSION_BUDGET_USD = 20;
 /**
  * Calculate total with tax for extension pricing
  * @param budgetUSD - Base budget amount in USD (without tax)
- * @param exchangeRate - Exchange rate (default: USD_TO_IQD_RATE)
+ * @param exchangeRate - Exchange rate from app_settings (fallback: FALLBACK_EXCHANGE_RATE)
  * @returns Object with budget, tax, totalUSD, and totalIQD
  */
 export function calculateTotalWithTax(
   budgetUSD: number,
-  exchangeRate: number = USD_TO_IQD_RATE
+  exchangeRate: number
 ): {
   budget: number;
   tax: number;

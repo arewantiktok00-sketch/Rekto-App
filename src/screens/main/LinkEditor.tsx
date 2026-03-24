@@ -1,59 +1,49 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import {
-  View,
-  StyleSheet,
-  ScrollView,
-  TextInput,
-  TouchableOpacity,
-  ActivityIndicator,
-  Alert,
-  Platform,
-  KeyboardAvoidingView,
-} from 'react-native';
-import { Image as ExpoImage } from 'expo-image';
-import { useRoute, useNavigation, useFocusEffect } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
-import {
-  Check,
-  GripVertical,
-  Phone,
-  MessageCircle,
-  Palette,
-  Save,
-  Upload,
-  X,
-  Plus,
+    Check,
+    GripVertical,
+    Palette,
+    Save,
+    Upload,
+    X
 } from 'lucide-react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+    ActivityIndicator,
+    Alert,
+    Image,
+    ScrollView,
+    StyleSheet,
+    TextInput,
+    TouchableOpacity,
+    View
+} from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // Removed DraggableFlatList to prevent screen freeze - using ScrollView instead
-import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system/legacy';
-import { useAuth } from '@/contexts/AuthContext';
-import { useLanguage } from '@/contexts/LanguageContext';
-import { supabase, safeQuery } from '@/integrations/supabase/client';
-import { useTheme } from '@/contexts/ThemeContext';
-import { spacing, borderRadius } from '@/theme/spacing';
-import { getTypographyStyles } from '@/theme/typography';
-import { toast } from '@/utils/toast';
-import { PLATFORMS, CTA_OPTIONS, THEMES, ICON_MAP } from '@/constants/platforms';
-import { getCached, setCached } from '@/services/globalCache';
-import { updateLinkPage, generateLinkMagicEmail } from '@/services/linkMagicApi';
-import { ThemeBottomSheet, ThemeBottomSheetRef } from '@/components/links/ThemeBottomSheet';
 import { ScreenHeader } from '@/components/common/ScreenHeader';
 import { Text } from '@/components/common/Text';
-import { isRTL, rtlText, rtlInput, rtlRow } from '@/utils/rtl';
+import { ThemeBottomSheet, ThemeBottomSheetRef } from '@/components/links/ThemeBottomSheet';
+import { CTA_OPTIONS, ICON_MAP, PLATFORMS, PLATFORM_FIELDS, REVERSE_ICON_MAP, THEMES } from '@/constants/platforms';
+import { useAuth } from '@/contexts/AuthContext';
+import { useLanguage } from '@/contexts/LanguageContext';
+import { useTheme } from '@/contexts/ThemeContext';
+import { safeQuery, supabase } from '@/integrations/supabase/client';
+import { getCached, setCached } from '@/services/globalCache';
+import { generateLinkMagicEmail, updateLinkPage } from '@/services/linkMagicApi';
+import { spacing } from '@/theme/spacing';
+import { getTypographyStyles } from '@/theme/typography';
+import { isRTL, rtlInput, rtlText } from '@/utils/rtl';
+import { toast } from '@/utils/toast';
+import { launchImageLibrary } from 'react-native-image-picker';
 
 const postLinksApi = async (payload: Record<string, any>) => {
-  const url = `${supabase.supabaseUrl}/functions/v1/links-api`;
   console.log('[Links API] Request:', payload);
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+  const { data, error } = await supabase.functions.invoke('links-api', {
+    body: payload,
   });
-  const data = await response.json().catch(() => ({}));
-  console.log('[Links API] Response:', response.status, data);
-  if (!response.ok || data?.error) {
+  console.log('[Links API] Response:', error ? 'error' : 'success', data);
+  if (error || data?.error) {
     throw new Error(data?.error || data?.message || 'Links API request failed');
   }
   return data;
@@ -65,6 +55,14 @@ interface PlatformData {
   enabled: boolean;
 }
 
+interface PlatformEntry {
+  id: string;
+  platformId: string;
+  value: string;
+  title?: string;
+  dbLinkId?: string;
+}
+
 export function LinkEditor() {
   const route = useRoute();
   const navigation = useNavigation();
@@ -73,8 +71,10 @@ export function LinkEditor() {
   const { t, language } = useLanguage();
   const isRtl = isRTL(language);
   const { colors } = useTheme();
-  const { linkId, link, linkmagic_email: paramEmail, isNew } = route.params as {
-    linkId: string;
+  // Null guards: avoid reading from undefined route.params (prevents layout/containerHeight-style crashes)
+  const routeParams = route?.params ?? {};
+  const { linkId, link, linkmagic_email: paramEmail, isNew } = routeParams as {
+    linkId?: string;
     link?: { id: string; slug?: string | null; linkmagic_email?: string | null };
     linkmagic_email?: string | null;
     isNew?: boolean;
@@ -93,6 +93,7 @@ export function LinkEditor() {
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
   const [platformData, setPlatformData] = useState<Record<string, string>>({});
   const [platformOrder, setPlatformOrder] = useState<string[]>([]);
+  const [platformDbLinkIds, setPlatformDbLinkIds] = useState<Record<string, string>>({});
   const [callToAction, setCallToAction] = useState<string | null>(
     link?.call_to_action === 'CONTACT_US'
       ? 'contact_us'
@@ -101,6 +102,7 @@ export function LinkEditor() {
       : null
   );
   const [selectedTheme, setSelectedTheme] = useState('pearl');
+  const [showThemeSheet, setShowThemeSheet] = useState(false);
   const [linkmagicEmail, setLinkmagicEmail] = useState<string | null>(paramEmail || link?.linkmagic_email || null);
   const [linkSlug, setLinkSlug] = useState<string | null>(link?.slug || null);
   const [syncStatus, setSyncStatus] = useState<'pending' | 'synced' | 'failed' | null>(null);
@@ -155,9 +157,8 @@ export function LinkEditor() {
     return msg.includes('network') || msg.includes('timeout') || msg.includes('failed to fetch') || msg.includes('connection');
   };
 
-  // NEVER accept local file paths for DB; only upload when URI is local (file://, content://, data:)
-  // Uses FileSystem base64 for iOS/Android compatibility (avoids "read property 'Base64' of undefined")
-  const uploadAvatarToStorage = async (imageUri: string, mimeType?: string | null): Promise<string> => {
+  // Upload avatar to Supabase; base64 from react-native-image-picker when picking from gallery.
+  const uploadAvatarToStorage = async (imageUri: string, mimeType?: string | null, base64FromPicker?: string): Promise<string> => {
     if (!user?.id) throw new Error('Missing user session');
 
     const activeLinkId = await resolveActiveLinkId();
@@ -180,20 +181,25 @@ export function LinkEditor() {
     const timestamp = Date.now();
     const fileName = `${user.id}/${activeLinkId}-${timestamp}.${extension}`;
 
-    let localFileUri = imageUri;
-
-    if (imageUri.startsWith('content://')) {
-      const tempPath = `${FileSystem.cacheDirectory}avatar-${timestamp}.${extension}`;
-      if (__DEV__) console.log('[Upload] Copying content:// URI to temp file:', tempPath);
-      await FileSystem.copyAsync({ from: imageUri, to: tempPath });
-      localFileUri = tempPath;
+    let base64Data = base64FromPicker;
+    if (!base64Data && (imageUri.startsWith('file://') || imageUri.startsWith('content://'))) {
+      try {
+        const response = await fetch(imageUri);
+        const blob = await response.blob();
+        base64Data = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const result = reader.result as string;
+            resolve(result ? result.split(',')[1] || '' : '');
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      } catch (e) {
+        if (__DEV__) console.warn('[Upload] fetch+base64 fallback failed:', e);
+        throw new Error('Failed to read image data');
+      }
     }
-
-    if (__DEV__) console.log('[Upload] Reading file as base64:', localFileUri);
-    const base64Data = await FileSystem.readAsStringAsync(localFileUri, {
-      encoding: 'base64',
-    } as { encoding: 'base64' });
-    if (__DEV__) console.log('[Upload] Base64 length:', base64Data?.length ?? 0);
 
     if (!base64Data || base64Data.length === 0) {
       throw new Error('Failed to read image data — base64 is empty');
@@ -229,10 +235,6 @@ export function LinkEditor() {
       throw new Error('Failed to get public URL');
     }
 
-    if (imageUri.startsWith('content://') && localFileUri !== imageUri) {
-      FileSystem.deleteAsync(localFileUri, { idempotent: true }).catch(() => {});
-    }
-
     return publicUrl;
   };
 
@@ -257,6 +259,30 @@ export function LinkEditor() {
     }
     if (trimmed.startsWith('https://t.me/')) {
       return trimmed.replace('https://t.me/', '');
+    }
+    if (trimmed.startsWith('https://snapchat.com/add/')) {
+      return trimmed.replace('https://snapchat.com/add/', '');
+    }
+    if (trimmed.startsWith('https://www.snapchat.com/add/')) {
+      return trimmed.replace('https://www.snapchat.com/add/', '');
+    }
+    if (trimmed.startsWith('https://tiktok.com/@')) {
+      return trimmed.replace('https://tiktok.com/@', '');
+    }
+    if (trimmed.startsWith('https://www.tiktok.com/@')) {
+      return trimmed.replace('https://www.tiktok.com/@', '');
+    }
+    if (trimmed.startsWith('https://youtube.com/@')) {
+      return trimmed.replace('https://youtube.com/@', '');
+    }
+    if (trimmed.startsWith('https://www.youtube.com/@')) {
+      return trimmed.replace('https://www.youtube.com/@', '');
+    }
+    if (trimmed.startsWith('https://youtube.com/c/')) {
+      return trimmed.replace('https://youtube.com/c/', '');
+    }
+    if (trimmed.startsWith('https://www.youtube.com/c/')) {
+      return trimmed.replace('https://www.youtube.com/c/', '');
     }
     return trimmed;
   };
@@ -286,30 +312,21 @@ export function LinkEditor() {
     if (platformId === 'facebook') return `https://facebook.com/${value}`;
     if (platformId === 'telegram') return `https://t.me/${value}`;
     if (platformId === 'website') return ensureHttps(value);
+    if (platformId === 'snapchat') return `https://snapchat.com/add/${value.replace(/^@/, '')}`;
+    if (platformId === 'tiktok') return `https://www.tiktok.com/@${value.replace(/^@/, '')}`;
+    if (platformId === 'youtube') return value.startsWith('http') ? ensureHttps(value) : `https://www.youtube.com/@${value.replace(/^@/, '')}`;
     return value;
   };
 
   const mapClientLinksToPlatforms = (clientLinks: any[]) => {
-    const reverseIconMap: Record<string, string> = {
-      whatsapp: 'whatsapp',
-      viber: 'viber',
-      instagram: 'instagram',
-      facebook: 'facebook',
-      telegram: 'telegram',
-      website: 'website',
-      korek: 'korek_phone',
-      asiacell: 'asiacell_phone',
-      zain: 'zain_phone',
-      appstore: 'app_store',
-      playstore: 'google_play',
-    };
     const iconToPlatformId = Object.keys(ICON_MAP).reduce<Record<string, string>>((acc, key) => {
       acc[ICON_MAP[key]] = key;
       return acc;
-    }, reverseIconMap);
+    }, { ...REVERSE_ICON_MAP });
     const orderedLinks = [...clientLinks].sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0));
     const mappedPlatformData: Record<string, string> = {};
     const mappedPlatforms: string[] = [];
+    const mappedDbLinkIds: Record<string, string> = {};
 
     orderedLinks.forEach((item) => {
       const platformId = iconToPlatformId[item.icon];
@@ -317,17 +334,23 @@ export function LinkEditor() {
       const value = cleanPlatformValue(item.value || '');
       if (!value) return;
       mappedPlatformData[platformId] = value;
+      if (!mappedDbLinkIds[platformId] && item.id) {
+        mappedDbLinkIds[platformId] = item.id;
+      }
       mappedPlatforms.push(platformId);
     });
 
     const uniquePlatforms = Array.from(new Set(mappedPlatforms));
-    return { mappedPlatformData, uniquePlatforms };
+    return { mappedPlatformData, uniquePlatforms, mappedDbLinkIds };
   };
 
   const PLATFORM_COLUMNS = [
     'whatsapp',
     'viber',
     'instagram',
+    'snapchat',
+    'tiktok',
+    'youtube',
     'facebook',
     'telegram',
     'website',
@@ -459,14 +482,16 @@ export function LinkEditor() {
       let nextPlatformData: Record<string, string> = {};
       let nextSelectedPlatforms: string[] = [];
       let nextPlatformOrder: string[] = [];
+      let nextPlatformDbLinkIds: Record<string, string> = {};
 
       if (!isNew) {
         const clientLinks = clientLinksResult.data || [];
         if (clientLinks.length > 0) {
-          const { mappedPlatformData, uniquePlatforms } = mapClientLinksToPlatforms(clientLinks);
+          const { mappedPlatformData, uniquePlatforms, mappedDbLinkIds } = mapClientLinksToPlatforms(clientLinks);
           nextPlatformData = mappedPlatformData;
           nextSelectedPlatforms = uniquePlatforms;
           nextPlatformOrder = uniquePlatforms;
+          nextPlatformDbLinkIds = mappedDbLinkIds;
         } else if (socialData) {
           const fallbackFields = [
             'whatsapp',
@@ -518,6 +543,7 @@ export function LinkEditor() {
         setPlatformData(nextPlatformData);
         setSelectedPlatforms(nextSelectedPlatforms);
         setPlatformOrder(nextPlatformOrder);
+        setPlatformDbLinkIds(nextPlatformDbLinkIds);
       }
       
     } catch (error: any) {
@@ -526,17 +552,20 @@ export function LinkEditor() {
       } else {
         console.error('Error loading link data:', error);
       }
-      toast.error(
-        isRtl ? 'هەڵەی تۆڕ' : 'Network Error',
-        isRtl
-          ? 'تکایە ئینتەرنێتەکەت بپشکنە'
-          : error.message || 'Please check your internet connection'
-      );
+      toast.error(t('error'), t('networkError'));
     }
   };
 
   const handleSave = async () => {
-    if (!user) return;
+    if (!user) {
+      Alert.alert(t('error') || 'Error', t('pleaseLoginAgain') || 'Please log in again');
+      return;
+    }
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      Alert.alert(t('error') || 'Error', t('pleaseLoginAgain') || 'Please log in again');
+      return;
+    }
     let emailForSave = linkmagicEmail;
     if (!emailForSave) {
       const slugCandidate =
@@ -568,38 +597,36 @@ export function LinkEditor() {
       if (!activeLinkId) {
         throw new Error('Missing link_id for platform save');
       }
+      // Ensure slug is never null for link_social_data: prefer existing slug state, then initial link, then link_id.
+      const safeSlug = linkSlug || link?.slug || activeLinkId;
 
       // STEP 1: Collect platform entries (only those with values)
-      const platformEntries: Array<{ platformId: string; value: string; title?: string }> = [];
+      const platformEntries: PlatformEntry[] = [];
       const baseOrder = platformOrder.length > 0 ? platformOrder : selectedPlatforms;
       const uniqueOrder = Array.from(new Set(baseOrder));
 
+      const isPhonePlatform = (id: string) =>
+        ['whatsapp', 'viber', 'korek_phone', 'asiacell_phone', 'zain_phone'].includes(id);
       for (const platformId of uniqueOrder) {
-        const value = platformData[platformId];
-        if (value && value.trim()) {
+        let value = (platformData[platformId] || '').trim();
+        if (!value) continue;
+        if (isPhonePlatform(platformId)) {
+          value = value.replace(/[\s\-+()]/g, '');
+        }
+        if (value) {
           platformEntries.push({
+            id: `${platformId}_${platformEntries.length + 1}`,
             platformId,
-            value: value.trim(),
+            value,
             title: platformId,
+            dbLinkId: platformDbLinkIds[platformId],
           });
         }
       }
 
       // STEP 2: Build platformValues object for link_social_data columns
-      // Map React Native platform IDs to database column names
-      const platformIdToDbColumn: Record<string, string> = {
-        whatsapp: 'whatsapp',
-        viber: 'viber',
-        instagram: 'instagram',
-        facebook: 'facebook',
-        telegram: 'telegram',
-        website: 'website',
-        korek_phone: 'korek_phone',
-        asiacell_phone: 'asiacell_phone',
-        zain_phone: 'zain_phone',
-        app_store: 'app_store',
-        google_play: 'google_play',
-      };
+      // Map React Native platform IDs to database column names (from PLATFORM_FIELDS)
+      const platformIdToDbColumn: Record<string, string> = { ...PLATFORM_FIELDS };
       const platformValues: Record<string, string | null> = {};
       const platformOrderArray: string[] = [];
       platformEntries.forEach((entry) => {
@@ -614,6 +641,28 @@ export function LinkEditor() {
       PLATFORM_COLUMNS.forEach((column) => {
         if (!platformValues.hasOwnProperty(column)) {
           platformValues[column] = null;
+        }
+      });
+      const ALL_PLATFORM_FIELDS = [
+        'whatsapp',
+        'viber',
+        'instagram',
+        'facebook',
+        'telegram',
+        'snapchat',
+        'tiktok',
+        'youtube',
+        'website',
+        'korek_phone',
+        'asiacell_phone',
+        'zain_phone',
+        'app_store',
+        'google_play',
+      ] as const;
+      const nullFields: Record<string, null> = {};
+      ALL_PLATFORM_FIELDS.forEach((field) => {
+        if (!platformValues[field]) {
+          nullFields[field] = null;
         }
       });
 
@@ -648,6 +697,8 @@ export function LinkEditor() {
         platform_order: platformOrderArray,
         sync_status: 'pending' as const,
         updated_at: new Date().toISOString(),
+        slug: safeSlug,
+        ...nullFields,
         ...platformValues,
       };
 
@@ -689,64 +740,145 @@ export function LinkEditor() {
 
       setSyncStatus('pending');
 
-      // STEP 5: Delete all existing client_links for this link
-      const { error: deleteError } = await supabase
+      // STEP 5: Read existing client_links and reconcile by icon/value
+      const { data: existingLinks, error: existingLinksError } = await supabase
         .from('client_links')
-        .delete()
+        .select('id, icon, value, url, title, display_order')
         .eq('user_id', user.id)
         .eq('link_id', activeLinkId);
 
-      if (deleteError) {
-        console.error('Error deleting client_links:', deleteError);
+      if (existingLinksError) {
+        console.error('Error loading existing client_links:', existingLinksError);
       }
 
-      // STEP 6: Insert new client_links rows
-      if (platformEntries.length > 0) {
-        const clientLinksToInsert = platformEntries.map((entry, index) => {
-          const icon = ICON_MAP[entry.platformId] || entry.platformId;
-          let url: string;
-          const cleanDigits = entry.value.replace(/[^\d+]/g, '');
-          if (icon === 'whatsapp') {
-            url = `https://wa.me/${cleanDigits}`;
-          } else if (icon === 'viber') {
-            url = `viber://chat?number=${cleanDigits}`;
-          } else if (icon === 'korek' || icon === 'asiacell' || icon === 'zain') {
-            url = `tel:${cleanDigits}`;
-          } else if (icon === 'instagram') {
-            const username = entry.value.replace(/^@/, '').replace(/^https?:\/\/(www\.)?instagram\.com\//, '');
-            url = `https://instagram.com/${username}`;
-          } else if (icon === 'facebook') {
-            const username = entry.value.replace(/^https?:\/\/(www\.)?facebook\.com\//, '');
-            url = `https://facebook.com/${username}`;
-          } else if (icon === 'telegram') {
-            const username = entry.value.replace(/^@/, '').replace(/^https?:\/\/(www\.)?t\.me\//, '');
-            url = `https://t.me/${username}`;
-          } else if (icon === 'website' || icon === 'appstore' || icon === 'playstore') {
-            url = entry.value.startsWith('http://') || entry.value.startsWith('https://')
-              ? entry.value
-              : `https://${entry.value}`;
-          } else {
-            url = entry.value;
-          }
-
-          return {
-            user_id: user.id,
-            link_id: activeLinkId,
-            icon: icon,
-            value: entry.value,
-            url: url,
-            title: entry.title || entry.platformId || '',
-            display_order: index + 1,
-            sync_status: 'pending' as const,
-          };
+      const allEntries = platformEntries
+        .filter((entry) => entry.value.trim())
+        .map((entry, index) => {
+        const icon = ICON_MAP[entry.platformId] || entry.platformId;
+        const url = buildUrlForPlatform(entry.platformId, entry.value);
+        return {
+          ...entry,
+          icon,
+          url,
+          title: entry.title || entry.platformId || '',
+          display_order: index + 1,
+        };
+      });
+      const currentIcons = new Set(allEntries.map((entry) => entry.icon));
+      const currentRemotePairs = new Set(allEntries.map((entry) => `${entry.icon}::${entry.url}`));
+      const existingById = new Map((existingLinks || []).map((link) => [link.id, link]));
+      const linksToUpdate = allEntries.filter((entry) => {
+        if (!entry.dbLinkId) return false;
+        const existing = existingById.get(entry.dbLinkId);
+        if (!existing) return false;
+        return existing.value !== entry.value;
+      });
+      const normalizeForCompare = (icon: string, value: string) => {
+        const normalizedValue = cleanPlatformValue(value || '');
+        if (['whatsapp', 'viber', 'korek', 'asiacell', 'zain'].includes(icon)) {
+          return normalizePhone(normalizedValue);
+        }
+        return normalizedValue.toLowerCase();
+      };
+      const linksToInsert = allEntries.filter((entry) => {
+        if (entry.dbLinkId) return false;
+        const alreadyExists = (existingLinks || []).some((link) => {
+          if (link.icon !== entry.icon) return false;
+          return normalizeForCompare(link.icon, link.value) === normalizeForCompare(entry.icon, entry.value);
         });
-
-        const { error: insertLinksError } = await supabase
+        return !alreadyExists;
+      });
+      const linksToDelete = (existingLinks || []).filter((link) => !currentIcons.has(link.icon));
+      for (const link of linksToDelete) {
+        await supabase
           .from('client_links')
-          .insert(clientLinksToInsert);
-
-        if (insertLinksError) {
-          throw insertLinksError;
+          .delete()
+          .eq('id', link.id)
+          .eq('user_id', user.id);
+        if (emailForSave) {
+          await supabase.functions.invoke('links-api', {
+            method: 'POST',
+            body: {
+              action: 'delete_by_icon_value',
+              user_email: emailForSave,
+              icon: link.icon,
+              value: link.value,
+            },
+          });
+        }
+      }
+      for (const entry of linksToUpdate) {
+        const icon = ICON_MAP[entry.platformId] || entry.platformId;
+        const url = buildUrlForPlatform(entry.platformId, entry.value);
+        await supabase
+          .from('client_links')
+          .update({
+            value: entry.value,
+            url,
+            title: entry.title || null,
+            display_order: entry.display_order,
+            sync_status: 'pending',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', entry.dbLinkId!)
+          .eq('user_id', user.id);
+        console.log('[LinkEditor] UPDATED existing client_link:', entry.dbLinkId, 'new value:', entry.value);
+      }
+      if (linksToInsert.length > 0) {
+        let nextOrder = (existingLinks || []).reduce((max, link) => {
+          const order = Number(link.display_order ?? 0);
+          return order > max ? order : max;
+        }, 0) + 1;
+        for (const entry of linksToInsert) {
+          const url = buildUrlForPlatform(entry.platformId, entry.value);
+          const { error: insertLinkError } = await supabase
+            .from('client_links')
+            .insert({
+              user_id: user.id,
+              link_id: activeLinkId,
+              icon: entry.icon,
+              value: entry.value,
+              url,
+              title: entry.title || null,
+              display_order: nextOrder++,
+              sync_status: 'pending',
+            });
+          if (insertLinkError) {
+            throw insertLinkError;
+          }
+          console.log('[LinkEditor] INSERTED new client_link:', entry.icon, entry.value);
+        }
+      }
+      if (emailForSave) {
+        for (const entry of linksToUpdate) {
+          const oldLink = entry.dbLinkId ? existingById.get(entry.dbLinkId) : undefined;
+          if (!oldLink) continue;
+          try {
+            await supabase.functions.invoke('links-api', {
+              body: {
+                action: 'delete_by_icon_value',
+                user_email: emailForSave,
+                icon: oldLink.icon,
+                value: oldLink.value,
+              },
+            });
+            console.log('[LinkEditor] Remote deleted old value:', oldLink.icon, oldLink.value);
+          } catch (err) {
+            console.warn('[LinkEditor] Remote delete failed:', err);
+          }
+          try {
+            await supabase.functions.invoke('linkmagic-proxy', {
+              body: {
+                action: 'add_link',
+                linkmagic_email: emailForSave,
+                icon: entry.icon,
+                value: entry.value,
+              },
+            });
+            console.log('[LinkEditor] Remote added new value:', entry.icon, entry.value);
+          } catch (err) {
+            console.warn('[LinkEditor] Remote add failed:', err);
+          }
         }
       }
 
@@ -804,7 +936,7 @@ export function LinkEditor() {
           ? 'زانیاریەکانت نوێ کرایەوە'
           : platformEntries.length > 0
           ? `${platformEntries.length} platform${platformEntries.length > 1 ? 's' : ''} saved`
-          : 'Your info has been updated'
+          : (t('yourInfoUpdated'))
       );
       navigation.goBack();
 
@@ -830,28 +962,7 @@ export function LinkEditor() {
         if (platformEntries.length > 0) {
           const syncPromises = platformEntries.map((entry) => {
             const icon = ICON_MAP[entry.platformId] || entry.platformId;
-            let formattedUrl = entry.value;
-            const cleanDigits = entry.value.replace(/[^\d+]/g, '');
-            if (icon === 'whatsapp') {
-              formattedUrl = `https://wa.me/${cleanDigits}`;
-            } else if (icon === 'viber') {
-              formattedUrl = `viber://chat?number=${cleanDigits}`;
-            } else if (icon === 'korek' || icon === 'asiacell' || icon === 'zain') {
-              formattedUrl = `tel:${cleanDigits}`;
-            } else if (icon === 'instagram') {
-              const username = entry.value.replace(/^@/, '').replace(/^https?:\/\/(www\.)?instagram\.com\//, '');
-              formattedUrl = `https://instagram.com/${username}`;
-            } else if (icon === 'facebook') {
-              const username = entry.value.replace(/^https?:\/\/(www\.)?facebook\.com\//, '');
-              formattedUrl = `https://facebook.com/${username}`;
-            } else if (icon === 'telegram') {
-              const username = entry.value.replace(/^@/, '').replace(/^https?:\/\/(www\.)?t\.me\//, '');
-              formattedUrl = `https://t.me/${username}`;
-            } else if (icon === 'website' || icon === 'appstore' || icon === 'playstore') {
-              formattedUrl = entry.value.startsWith('http://') || entry.value.startsWith('https://')
-                ? entry.value
-                : `https://${entry.value}`;
-            }
+            const formattedUrl = buildUrlForPlatform(entry.platformId, entry.value);
             return supabase.functions.invoke('linkmagic-proxy', {
               body: {
                 action: 'add_link',
@@ -865,6 +976,30 @@ export function LinkEditor() {
           if (syncResults.some((result) => result.status === 'rejected')) {
             syncFailed = true;
           }
+        }
+        try {
+          const { data: remoteData } = await supabase.functions.invoke('linkmagic-proxy', {
+            method: 'POST',
+            body: { action: 'get', user_email: emailForSave },
+          });
+          const remoteLinks = remoteData?.data?.links || remoteData?.links || [];
+          for (const remoteLink of remoteLinks) {
+            const remoteValue = remoteLink.url || remoteLink.value;
+            const pairKey = `${remoteLink.icon}::${remoteValue}`;
+            if (!currentIcons.has(remoteLink.icon) || !currentRemotePairs.has(pairKey)) {
+              await supabase.functions.invoke('links-api', {
+                method: 'POST',
+                body: {
+                  action: 'delete_by_icon_value',
+                  user_email: emailForSave,
+                  icon: remoteLink.icon,
+                  value: remoteLink.value,
+                },
+              });
+            }
+          }
+        } catch (_) {
+          syncFailed = true;
         }
 
         const nextStatus: 'synced' | 'failed' = syncFailed ? 'failed' : 'synced';
@@ -894,11 +1029,8 @@ export function LinkEditor() {
         setSyncStatus(nextStatus);
       })();
     } catch (error: any) {
-      console.error('Error saving link:', error);
-      toast.error(
-        isRtl ? 'هەڵە!' : 'Error',
-        isRtl ? 'پاشەکەوتکردن سەرکەوتوو نەبوو' : 'Failed to save'
-      );
+      console.error('Save failed:', error);
+      toast.error(t('error'), t('somethingWentWrong'));
     } finally {
       setSaving(false);
     }
@@ -913,21 +1045,29 @@ export function LinkEditor() {
       if (!linkmagicEmail) {
         console.warn('⚠️ Missing linkmagic_email. Skipping delete API call.');
       } else if (iconName && platformValue) {
-        const normalizedValue =
-          platformId === 'whatsapp' ||
-          platformId === 'viber' ||
-          platformId === 'korek_phone' ||
-          platformId === 'asiacell_phone' ||
-          platformId === 'zain_phone'
-            ? normalizePhone(platformValue)
-            : platformValue;
-        void postLinksApi({
-          action: 'delete_by_icon_value',
-          user_email: linkmagicEmail,
-          icon: iconName,
-          value: normalizedValue,
-        }).catch((error) => {
-          toast.error('Error', error.message || 'Failed to delete link');
+        void (async () => {
+          const activeLinkIdForDelete = await resolveActiveLinkId();
+          let rawValue = buildUrlForPlatform(platformId, platformValue);
+          if (activeLinkIdForDelete) {
+            const { data: existingLink } = await supabase
+              .from('client_links')
+              .select('value')
+              .eq('user_id', user.id)
+              .eq('link_id', activeLinkIdForDelete)
+              .eq('icon', iconName)
+              .maybeSingle();
+            if (existingLink?.value) {
+              rawValue = existingLink.value;
+            }
+          }
+          await postLinksApi({
+            action: 'delete_by_icon_value',
+            user_email: linkmagicEmail,
+            icon: iconName,
+            value: rawValue,
+          });
+        })().catch(() => {
+          toast.error(t('error'), t('somethingWentWrong'));
         });
         void deleteClientLinkLocal(iconName);
       }
@@ -950,6 +1090,11 @@ export function LinkEditor() {
       }
       setSelectedPlatforms(selectedPlatforms.filter((id) => id !== platformId));
       setPlatformOrder(platformOrder.filter((id) => id !== platformId));
+      if (platformDbLinkIds[platformId]) {
+        const nextDbLinkIds = { ...platformDbLinkIds };
+        delete nextDbLinkIds[platformId];
+        setPlatformDbLinkIds(nextDbLinkIds);
+      }
       if (platformData[platformId]) {
         delete platformData[platformId];
         setPlatformData({ ...platformData });
@@ -968,75 +1113,73 @@ export function LinkEditor() {
 
   const handleImagePicker = async () => {
     try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
+      const result = await launchImageLibrary({
+        mediaType: 'photo',
+        quality: 0.8,
+        includeBase64: true,
+      });
+
+      if (result.didCancel || !result.assets?.[0]) return;
+
+      const asset = result.assets[0];
+      const imageUri = asset.uri ?? '';
+      if (result.errorCode === 'permission') {
         toast.warning(
           isRtl ? 'دەسەڵات' : 'Permission',
           isRtl ? 'دەسەڵاتی وێنە پێویستە' : 'Media library permission is required'
         );
         return;
       }
+      if (result.errorMessage) {
+        toast.error(t('error'), t('somethingWentWrong'));
+        return;
+      }
 
-      // Use MediaType array (not deprecated MediaTypeOptions).
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.8,
-      });
-
-      if (!result.canceled && result.assets[0]) {
-        const asset = result.assets[0];
-        const imageUri = asset.uri;
-        if (imageUri.startsWith('https://') && imageUri.includes('supabase')) {
-          setAvatarRetryCount(0);
-          setAvatarLoadError(false);
-          setAvatarUrl(imageUri);
-        } else if (!imageUri.startsWith('http')) {
-          if (!user?.id) {
-            toast.error(isRtl ? 'هەڵە' : 'Error', isRtl ? 'پێویستە چوونەژوورەوە بکەیت' : 'You must be signed in');
+      if (imageUri.startsWith('https://') && imageUri.includes('supabase')) {
+        setAvatarRetryCount(0);
+        setAvatarLoadError(false);
+        setAvatarUrl(imageUri);
+      } else if (!imageUri.startsWith('http')) {
+        if (!user?.id) {
+          toast.error(t('error'), t('pleaseLoginAgain'));
+          return;
+        }
+        let uploadedUrl: string;
+        try {
+          uploadedUrl = await uploadAvatarToStorage(imageUri, asset.type ?? null, asset.base64 ?? undefined);
+        } catch {
+          const activeLinkId = await resolveActiveLinkId();
+          const linkIdForPath = activeLinkId || `new-${Date.now()}`;
+          const timestamp = Date.now();
+          const storagePath = `${user.id}/${linkIdForPath}-${timestamp}.jpg`;
+          const response = await fetch(imageUri);
+          const blob = await response.blob();
+          const { error: uploadError } = await supabase.storage
+            .from(LINK_AVATARS_BUCKET)
+            .upload(storagePath, blob, { contentType: 'image/jpeg', upsert: true });
+          if (uploadError) {
+            console.error('Avatar upload error:', uploadError);
+            toast.error(t('error'), t('somethingWentWrong'));
             return;
           }
-          let uploadedUrl: string;
-          try {
-            uploadedUrl = await uploadAvatarToStorage(imageUri, asset.mimeType ?? null);
-          } catch {
-            const activeLinkId = await resolveActiveLinkId();
-            const linkIdForPath = activeLinkId || `new-${Date.now()}`;
-            const timestamp = Date.now();
-            const storagePath = `${user.id}/${linkIdForPath}-${timestamp}.jpg`;
-            const response = await fetch(imageUri);
-            const blob = await response.blob();
-            const { error: uploadError } = await supabase.storage
-              .from(LINK_AVATARS_BUCKET)
-              .upload(storagePath, blob, { contentType: 'image/jpeg', upsert: true });
-            if (uploadError) {
-              console.error('Avatar upload error:', uploadError);
-              toast.error(isRtl ? 'هەڵە' : 'Error', isRtl ? 'نەتوانرا وێنە بار بکرێت' : 'Failed to upload image');
-              return;
-            }
-            const { data: urlData } = supabase.storage.from(LINK_AVATARS_BUCKET).getPublicUrl(storagePath);
-            uploadedUrl = urlData.publicUrl;
-          }
-          setAvatarRetryCount(0);
-          setAvatarLoadError(false);
-          setAvatarUrl(uploadedUrl);
-        } else {
-          setAvatarRetryCount(0);
-          setAvatarLoadError(false);
-          setAvatarUrl(imageUri);
+          const { data: urlData } = supabase.storage.from(LINK_AVATARS_BUCKET).getPublicUrl(storagePath);
+          uploadedUrl = urlData.publicUrl;
         }
-        toast.success(
-          isRtl ? 'سەرکەوتوو' : 'Success',
-          isRtl ? 'وێنە هەڵگیرا' : 'Image selected'
-        );
+        setAvatarRetryCount(0);
+        setAvatarLoadError(false);
+        setAvatarUrl(uploadedUrl);
+      } else {
+        setAvatarRetryCount(0);
+        setAvatarLoadError(false);
+        setAvatarUrl(imageUri);
       }
+      toast.success(
+        isRtl ? 'سەرکەوتوو' : 'Success',
+        isRtl ? 'وێنە هەڵگیرا' : 'Image selected'
+      );
     } catch (error: any) {
       console.error('Image picker error:', error);
-      toast.error(
-        isRtl ? 'هەڵە' : 'Error',
-        error.message || (isRtl ? 'نەتوانرا وێنە هەڵبگیرێت' : 'Failed to pick image')
-      );
+      toast.error(t('error'), t('somethingWentWrong'));
     }
   };
 
@@ -1046,11 +1189,19 @@ export function LinkEditor() {
     .map((id) => PLATFORMS.find((p) => p.id === id))
     .filter(Boolean) as typeof PLATFORMS;
 
+  const openThemeSheet = () => {
+    if (!showThemeSheet) {
+      setShowThemeSheet(true);
+      requestAnimationFrame(() => {
+        setTimeout(() => themeBottomSheetRef.current?.present(), 0);
+      });
+      return;
+    }
+    themeBottomSheetRef.current?.present();
+  };
+
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={{ flex: 1 }}
-    >
+    <View style={{ flex: 1 }}>
     <View style={styles.container}>
       <ScreenHeader
         title={isNew ? (isRtl ? 'لینکی نوێ' : (t('newLink') || 'New Link')) : (isRtl ? 'دەستکاری لینک' : (t('editLink') || 'Edit Link'))}
@@ -1064,7 +1215,7 @@ export function LinkEditor() {
             ]}
           >
             <Text style={styles.syncBadgeText} numberOfLines={1}>
-              {syncStatus === 'pending' ? 'Syncing' : syncStatus === 'failed' ? 'Failed' : 'Live'}
+              {syncStatus === 'pending' ? (language === 'ar' ? 'قيد المعالجة' : 'چاوەڕوان') : syncStatus === 'failed' ? (language === 'ar' ? 'فشل' : 'سەرکەوتوو نەبوو') : (language === 'ar' ? 'مُزامَن' : 'کار دەکا')}
             </Text>
           </View>
         ) : undefined}
@@ -1078,7 +1229,6 @@ export function LinkEditor() {
           paddingHorizontal: 0,
         }}
         showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
       >
         <View style={{ paddingHorizontal: 16, width: '100%' }}>
         {/* Avatar & Basic Info Section */}
@@ -1092,12 +1242,12 @@ export function LinkEditor() {
             <View style={styles.avatarContainer}>
               <TouchableOpacity style={styles.avatarWrapper} onPress={handleImagePicker}>
                 {avatarUrl && typeof avatarUrl === 'string' && avatarUrl.startsWith('https://') ? (
-                  <ExpoImage
+                  <Image
                     source={{ uri: avatarUrl }}
                     style={{ width: 80, height: 80, borderRadius: 40 }}
-                    contentFit="cover"
+                    resizeMode="cover"
                     onError={() => {
-                      if (__DEV__) console.log('[Avatar] ExpoImage failed, clearing URL');
+                      if (__DEV__) console.log('[Avatar] Image failed, clearing URL');
                       setAvatarUrl(null);
                     }}
                   />
@@ -1148,7 +1298,7 @@ export function LinkEditor() {
 
         {/* Platforms Selection Grid */}
         <View style={styles.section}>
-          <View style={[styles.sectionTitleRow, isRtl && styles.sectionTitleRowRTL]}>
+          <View style={styles.sectionTitleRow}>
             <Text style={[styles.sectionTitle, rtlText(isRtl)]}>
               {isRtl ? 'پلاتفۆرمەکان' : t('platforms') || 'Platforms'}
             </Text>
@@ -1209,7 +1359,7 @@ export function LinkEditor() {
         {/* Platform Inputs - Draggable */}
         {orderedPlatforms.length > 0 && (
           <View style={styles.section}>
-            <View style={[styles.sectionTitleRow, isRtl && styles.sectionTitleRowRTL]}>
+            <View style={styles.sectionTitleRow}>
               <Text style={[styles.sectionTitle, rtlText(isRtl)]}>
                 {isRtl ? 'زانیاری پلاتفۆرمەکان' : t('platformLinks') || 'Platform Links'}
               </Text>
@@ -1222,12 +1372,7 @@ export function LinkEditor() {
             <Text style={[styles.hintText, rtlText(isRtl)]}>
               {isRtl ? 'ڕیزبەندی بکە' : t('reorderHint') || 'Drag to reorder'}
             </Text>
-            {/* Use regular ScrollView instead of DraggableFlatList to prevent freeze */}
-            <ScrollView 
-              style={styles.platformInputsScroll}
-              keyboardShouldPersistTaps="handled"
-              nestedScrollEnabled={true}
-            >
+            <View style={styles.platformInputsList}>
               {orderedPlatforms.map((platform, index) => {
                 const Icon = platform.icon;
                 return (
@@ -1259,8 +1404,14 @@ export function LinkEditor() {
                           : 'default'
                       }
                     />
-                    <View style={styles.platformInputActions}>
-                      {platformData[platform.id] && (
+                    <View style={[styles.platformInputActions, isRtl && styles.platformInputActionsRTL]}>
+                      <Text
+                        style={[styles.platformInputHint, rtlText(isRtl), isRtl && { fontFamily: 'Rabar_021' }]}
+                        numberOfLines={1}
+                      >
+                        {isRtl ? platform.hintKu : platform.hint}
+                      </Text>
+                      {platformData[platform.id] ? (
                         <TouchableOpacity
                           style={styles.removeButton}
                           onPress={() => {
@@ -1269,12 +1420,12 @@ export function LinkEditor() {
                         >
                           <X size={16} color="#EF4444" />
                         </TouchableOpacity>
-                      )}
+                      ) : null}
                     </View>
                   </View>
                 );
               })}
-            </ScrollView>
+            </View>
           </View>
         )}
 
@@ -1318,7 +1469,7 @@ export function LinkEditor() {
         <View style={[styles.section, isRtl && styles.sectionRTL]}>
           <TouchableOpacity
             style={[styles.themeSelector, isRtl && styles.themeSelectorRTL]}
-            onPress={() => themeBottomSheetRef.current?.present()}
+            onPress={openThemeSheet}
           >
             <View style={[styles.themeSelectorLeft, isRtl && styles.themeSelectorLeftRTL]}>
               <Palette size={20} color={colors.foreground.DEFAULT} />
@@ -1367,13 +1518,15 @@ export function LinkEditor() {
       </View>
 
       {/* Theme Bottom Sheet */}
-      <ThemeBottomSheet
-        ref={themeBottomSheetRef}
-        selectedTheme={selectedTheme}
-        onSelectTheme={setSelectedTheme}
-      />
+      {showThemeSheet ? (
+        <ThemeBottomSheet
+          ref={themeBottomSheetRef}
+          selectedTheme={selectedTheme}
+          onSelectTheme={setSelectedTheme}
+        />
+      ) : null}
     </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -1435,7 +1588,7 @@ const createStyles = (colors: any, insets: any, isRtl: boolean, typography: any)
   },
   headerRightSlot: {
     minWidth: 56,
-    alignItems: isRtl ? 'flex-start' : 'flex-end',
+    alignItems: 'flex-end',
     justifyContent: 'center',
   },
   headerPlaceholder: {
@@ -1492,9 +1645,6 @@ const createStyles = (colors: any, insets: any, isRtl: boolean, typography: any)
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: spacing.md,
-  },
-  sectionTitleRowRTL: {
-    flexDirection: 'row',
   },
   requiredBadge: {
     paddingHorizontal: 8,
@@ -1718,8 +1868,8 @@ const createStyles = (colors: any, insets: any, isRtl: boolean, typography: any)
     textAlign: isRtl ? 'right' : 'left',
     writingDirection: isRtl ? 'rtl' : 'ltr',
   },
-  platformInputsScroll: {
-    maxHeight: 400,
+  platformInputsList: {
+    flexDirection: 'column',
   },
   platformInputActions: {
     flexDirection: 'row',
@@ -1727,6 +1877,14 @@ const createStyles = (colors: any, insets: any, isRtl: boolean, typography: any)
     justifyContent: 'space-between',
     marginTop: spacing.sm,
     gap: spacing.sm,
+  },
+  platformInputActionsRTL: {
+    flexDirection: 'row-reverse',
+  },
+  platformInputHint: {
+    fontSize: 11,
+    color: colors.foreground.muted,
+    flex: 1,
   },
   removeButton: {
     padding: spacing.xs,

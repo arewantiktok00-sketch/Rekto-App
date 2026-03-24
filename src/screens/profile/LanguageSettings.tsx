@@ -1,16 +1,15 @@
-import React from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useLanguage } from '@/contexts/LanguageContext';
-import { Check, Globe2 } from 'lucide-react-native';
-import { useTheme } from '@/contexts/ThemeContext';
-import { spacing, borderRadius } from '@/theme/spacing';
-import { getTypographyStyles } from '@/theme/typography';
-import { toast } from '@/utils/toast';
-import { Text } from '@/components/common/Text';
 import { ScreenHeader } from '@/components/common/ScreenHeader';
-import { rtlText, rtlRow } from '@/utils/rtl';
+import { Text } from '@/components/common/Text';
+import { useLanguage } from '@/contexts/LanguageContext';
+import { useTheme } from '@/contexts/ThemeContext';
+import { borderRadius, spacing } from '@/theme/spacing';
+import { getTypographyStyles } from '@/theme/typography';
+import { rtlRow, rtlText } from '@/utils/rtl';
+import { toast } from '@/utils/toast';
+import { useNavigation } from '@react-navigation/native';
+import { Check, Globe2 } from 'lucide-react-native';
+import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export function LanguageSettings() {
   const navigation = useNavigation();
@@ -22,13 +21,13 @@ export function LanguageSettings() {
   const styles = createStyles(colors, insets, typography, rtl);
 
   const languages = [
-    { code: 'ckb', name: 'Kurdish (Sorani)', nativeName: 'کوردی', countryCode: 'IQ' },
-    { code: 'ar', name: 'Arabic', nativeName: 'العربية', countryCode: 'IQ' },
+    { code: 'ckb' as const, name: 'کوردی', nativeName: 'کوردی' },
+    { code: 'ar' as const, name: 'العربية', nativeName: 'العربية' },
   ];
 
   const handleLanguageChange = async (lang: 'ckb' | 'ar') => {
     await setLanguage(lang);
-    toast.success('باشە', 'زمان نوێکرایەوە');
+    toast.success(t('ok'), t('languageUpdated'));
   };
 
   const currentLanguage = languages.find((l) => l.code === language) || languages[0];
@@ -36,7 +35,7 @@ export function LanguageSettings() {
   return (
     <View style={styles.container}>
       <ScreenHeader
-        title={t('languageSettings') || 'profile.language'}
+        title={t('languageSettings')}
         onBack={() => navigation.goBack()}
         style={{ paddingTop: insets.top + 8 }}
       />
@@ -54,15 +53,15 @@ export function LanguageSettings() {
           </View>
           <View style={styles.currentLanguageContent}>
             <Text style={[styles.currentLanguageLabel, rtlText(rtl)]}>
-              {t('profileCurrentLanguage') || 'Current Language'}
+              {t('currentLanguage')}
             </Text>
-            <Text style={[styles.currentLanguageValue, rtlText(rtl)]}>{currentLanguage.name}</Text>
+            <Text style={[styles.currentLanguageValue, rtlText(rtl)]}>{currentLanguage.nativeName}</Text>
           </View>
         </View>
 
         {/* Section label */}
         <Text style={[styles.sectionLabel, rtlText(rtl)]}>
-          {t('profileSelectLanguage') || 'Select Language'}
+          {t('selectLanguage')}
         </Text>
 
         {/* Language options */}
@@ -78,30 +77,10 @@ export function LanguageSettings() {
               onPress={() => handleLanguageChange(lang.code as any)}
               activeOpacity={0.7}
             >
-              <View style={[styles.languageCountry, rtl && { marginEnd: 0, marginStart: spacing.md }]}>
-                <Text
-                  style={[
-                    styles.countryCode,
-                    rtlText(rtl),
-                    language === lang.code && styles.languageTextSelected,
-                  ]}
-                >
-                  {lang.countryCode}
-                </Text>
-              </View>
               <View style={styles.languageLeft}>
                 <Text
                   style={[
                     styles.languageName,
-                    rtlText(rtl),
-                    language === lang.code && styles.languageTextSelected,
-                  ]}
-                >
-                  {lang.name}
-                </Text>
-                <Text
-                  style={[
-                    styles.languageNative,
                     rtlText(rtl),
                     language === lang.code && styles.languageTextSelected,
                   ]}
@@ -120,7 +99,7 @@ export function LanguageSettings() {
 
         <View style={styles.infoCard}>
           <Text style={[styles.infoText, rtlText(rtl)]}>
-            {t('confirmLanguageChange') || 'Changing language will update the app interface immediately.'}
+            {t('confirmLanguageChange')}
           </Text>
         </View>
         </View>
@@ -147,9 +126,6 @@ const createStyles = (colors: any, insets: any, typography: any, rtl?: boolean) 
   headerRTL: {
     flexDirection: 'row',
   },
-  rowReverse: {
-    flexDirection: 'row',
-  },
   textRTL: {
     textAlign: 'right',
     writingDirection: 'rtl',
@@ -174,13 +150,10 @@ const createStyles = (colors: any, insets: any, typography: any, rtl?: boolean) 
     color: '#000',
     fontWeight: '500',
   },
-  rowReverse: {
-    flexDirection: 'row',
-  },
   headerLeftSlot: {
     minWidth: 100,
     maxWidth: 100,
-    alignItems: rtl ? 'flex-end' : 'flex-start',
+    alignItems: 'flex-start',
     justifyContent: 'center',
   },
   headerRightSlot: {

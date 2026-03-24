@@ -1,10 +1,11 @@
 import { Text } from '@/components/common/Text';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import { getTranslation, type LocaleKey } from '@/i18n/translations';
 import { safeQuery, supabase } from '@/integrations/supabase/client';
 import { borderRadius, spacing } from '@/theme/spacing';
 import { getFontFamily } from '@/utils/fonts';
-import { LinearGradient } from 'expo-linear-gradient';
+import LinearGradient from 'react-native-linear-gradient';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     Dimensions,
@@ -63,11 +64,11 @@ const DEFAULT_SLIDES: Slide[] = [
   },
 ];
 
-// Tags for each slide (3 tags per slide)
-const SLIDE_TAGS = [
-  ['TikTok Ads', 'Easy Setup', 'Fast Results'],
-  ['Reach Millions', 'Target Audience', 'Powerful Tools'],
-  ['Real-time', 'Analytics', 'Performance'],
+// Translation keys for 3 tags per slide (ckb/ar only - no English)
+const SLIDE_TAG_KEYS: [string, string, string][] = [
+  ['tagTikTokAds', 'tagEasySetup', 'tagFastResults'],
+  ['tagReachMillions', 'tagTargetAudience', 'tagPowerfulTools'],
+  ['tagRealtime', 'tagAnalytics', 'tagPerformance'],
 ];
 
 const AUTO_ROTATE_INTERVAL = 5000; // 5 seconds
@@ -112,18 +113,20 @@ export const HeroBanner: React.FC = () => {
     }
 
     const channel = supabase
-      .channel('banner-content')
+      .channel('app-settings-realtime')
       .on(
         'postgres_changes',
         {
-          event: '*',
+          event: 'UPDATE',
           schema: 'public',
           table: 'app_settings',
-          filter: 'key=eq.banner_content',
+          filter: 'key=eq.global',
         },
         (payload) => {
-          if (payload.new?.value?.slides) {
-            setSlides(normalizeSlides(payload.new.value.slides));
+          const v = (payload.new as any)?.value;
+          if (v?.banners) {
+            const banners = (v.banners as any[]).filter((b: any) => b.enabled !== false) ?? [];
+            if (banners.length > 0) setSlides(normalizeSlides(banners));
           }
         }
       )
@@ -164,6 +167,19 @@ export const HeroBanner: React.FC = () => {
 
   const loadBannerContent = async () => {
     try {
+      const { data: globalData } = await safeQuery((client) =>
+        client
+          .from('app_settings')
+          .select('value')
+          .eq('key', 'global')
+          .single()
+      );
+      const bannersFromGlobal = globalData?.value?.banners?.filter((b: any) => b.enabled !== false) ?? [];
+      if (Array.isArray(bannersFromGlobal) && bannersFromGlobal.length > 0) {
+        setSlides(normalizeSlides(bannersFromGlobal));
+        return;
+      }
+
       const { data } = await safeQuery((client) =>
         client
           .from('app_settings')
@@ -171,7 +187,6 @@ export const HeroBanner: React.FC = () => {
           .eq('key', 'banner_content')
           .single()
       );
-
       setSlides(normalizeSlides(data?.value?.slides));
     } catch (error) {
       console.error('Failed to load banner content:', error);
@@ -201,7 +216,9 @@ export const HeroBanner: React.FC = () => {
   const safeIndex = Number.isFinite(currentIndex) ? currentIndex : 0;
   const currentSlide = slides[safeIndex] || DEFAULT_SLIDES[0];
   const fallbackSlide = DEFAULT_SLIDES[safeIndex] || DEFAULT_SLIDES[0];
-  const currentTags = SLIDE_TAGS[safeIndex] || SLIDE_TAGS[0];
+  const tagKeys = SLIDE_TAG_KEYS[safeIndex] || SLIDE_TAG_KEYS[0];
+  const locale: LocaleKey = (language === 'ar' ? 'ar' : 'ckb');
+  const currentTags = tagKeys.map((key) => getTranslation(key, locale));
 
   return (
     <View style={styles.container}>
@@ -212,18 +229,18 @@ export const HeroBanner: React.FC = () => {
         end={{ x: 1, y: 0 }}
       >
         {/* Slide content */}
-        <View style={[styles.content, isRTL && styles.contentRTL]}>
+        <View style={styles.content}>
           {/* Title */}
           <Text style={styles.title}>{getLocalizedText(currentSlide, fallbackSlide, 'title')}</Text>
           
           {/* Subtitle */}
           <Text style={styles.subtitle}>{getLocalizedText(currentSlide, fallbackSlide, 'subtitle')}</Text>
 
-          {/* Tags Row */}
-          <View style={[styles.tagsRow, isRTL && styles.tagsRowRTL]}>
+          {/* Tags Row - localized only (ckb/ar) */}
+          <View style={styles.tagsRow}>
             {currentTags.map((tag, idx) => (
               <View key={idx} style={styles.tagContainer}>
-                <Text style={styles.tag}>{tag}</Text>
+                <Text style={[styles.tag, { textAlign: 'right', writingDirection: 'rtl' }]}>{tag}</Text>
               </View>
             ))}
           </View>
@@ -277,7 +294,7 @@ const createStyles = (colors: any, fontFamily: string, isDark: boolean, isRTL?: 
       minHeight: 150,
     },
     content: {
-      alignItems: isRTL ? 'flex-end' : 'center',
+      alignItems: 'center',
       zIndex: 1,
       paddingBottom: 10,
       justifyContent: 'center',
@@ -290,7 +307,7 @@ const createStyles = (colors: any, fontFamily: string, isDark: boolean, isRTL?: 
       fontSize: 20,
       fontFamily: fontFamily === 'Rabar_021' ? 'Rabar_021' : 'Poppins-Bold',
       color: colors.primary.foreground,
-      textAlign: 'left',
+      textAlign: 'right',
       writingDirection: 'rtl',
       marginBottom: 6,
       fontWeight: '700',
@@ -300,7 +317,7 @@ const createStyles = (colors: any, fontFamily: string, isDark: boolean, isRTL?: 
       fontSize: 14,
       fontFamily: fontFamily === 'Rabar_021' ? 'Rabar_021' : 'Poppins-Regular',
       color: colors.primary.foreground,
-      textAlign: 'left',
+      textAlign: 'right',
       writingDirection: 'rtl',
       marginBottom: 12,
       opacity: 0.95,
@@ -308,7 +325,7 @@ const createStyles = (colors: any, fontFamily: string, isDark: boolean, isRTL?: 
     },
     tagsRow: {
       flexDirection: 'row',
-      justifyContent: isRTL ? 'flex-end' : 'center',
+      justifyContent: 'center',
       alignItems: 'center',
       gap: 8,
       flexWrap: 'wrap',

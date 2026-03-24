@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { LinkingOptions, NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRemoteConfig } from '@/contexts/RemoteConfigContext';
@@ -12,7 +12,7 @@ import { BroadcastScreen } from '@/screens/owner/BroadcastScreen';
 import { CampaignDetail } from '@/screens/main/CampaignDetail';
 import { Analytics } from '@/screens/main/Analytics';
 import { Notifications } from '@/screens/main/Notifications';
-import { Invoice } from '@/screens/main/Invoice';
+import Invoice from '@/screens/main/Invoice';
 import { InvoiceHistory } from '@/screens/main/InvoiceHistory';
 import { PaymentSuccess } from '@/screens/main/PaymentSuccess';
 import { Terms } from '@/screens/legal/Terms';
@@ -24,30 +24,54 @@ import { LinkEditor } from '@/screens/main/LinkEditor';
 import { TopResultsScreen } from '@/screens/TopResultsScreen';
 import { Tutorial } from '@/screens/main/Tutorial';
 import MaintenanceScreen from '@/screens/MaintenanceScreen';
-import { View, TouchableOpacity, Linking } from 'react-native';
+import { View, TouchableOpacity, Linking, Keyboard } from 'react-native';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useOwnerAuth } from '@/hooks/useOwnerAuth';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { navigationRef } from '@/navigation/navigationService';
-import Constants from 'expo-constants';
+import Constants from '@/lib/constants';
 import { Text } from '@/components/common/Text';
 
 const Stack = createNativeStackNavigator();
+
+const AUTH_SCREEN_NAMES = new Set([
+  'Auth', 'Index', 'Login', 'SignUp', 'PhoneLogin', 'PhoneSignUp', 'VerifyCode', 'VerifyEmail',
+  'ForgotPassword', 'ForgotPasswordOTP', 'ForgotPasswordNewPassword', 'ForgotPasswordPhone', 'ResetPassword', 'Blocked',
+]);
 
 export default function RootNavigator() {
   const { user, loading, isBlocked, blockReason } = useAuth();
   const { config } = useRemoteConfig();
   const { hasAdminAccess, loading: ownerLoading } = useOwnerAuth();
+  const sentAdminToDashboardRef = useRef(false);
   const { colors } = useTheme();
   const { language } = useLanguage();
   const [updateRequired, setUpdateRequired] = useState(false);
+  const linking = useMemo<LinkingOptions<any>>(
+    () => ({
+      prefixes: ['rektoapp://'],
+      config: {
+        screens: {
+          Main: {
+            screens: {
+              Dashboard: 'dashboard',
+              Campaigns: 'campaigns',
+              CreateAd: 'create',
+              Links: 'links',
+              Tutorial: 'tutorial',
+            },
+          },
+          CampaignDetail: 'campaign/:id',
+          Notifications: 'notifications',
+          TopResults: 'top-results',
+        },
+      },
+    }),
+    []
+  );
 
   const appVersion = useMemo(() => {
-    return (
-      Constants.expoConfig?.version ||
-      (Constants as any)?.manifest?.version ||
-      '0.0.0'
-    );
+    return (Constants as any)?.manifest?.version ?? '1.0.0';
   }, []);
 
   const compareVersions = (current: string, required: string) => {
@@ -128,23 +152,41 @@ export default function RootNavigator() {
     }
   }, [user, loading]);
 
-  // Redirect reviewers/owners to OwnerDashboard after login
-  // CRITICAL: This useEffect MUST be called BEFORE any conditional returns to maintain hooks order
+  // When user logs out, clear "sent admin to dashboard" so next login can redirect again
   useEffect(() => {
-    if (!loading && !ownerLoading && user && hasAdminAccess && !isBlocked && navigationRef.current?.isReady()) {
-      // Small delay to ensure navigation is ready
+    if (!user) sentAdminToDashboardRef.current = false;
+  }, [user]);
+
+  // When user logs in: wait for owner-check, then reset to the correct root (Main or OwnerDashboard).
+  // Single effect so reviewers get a clean reset to OwnerDashboard without race with "reset to Main".
+  useEffect(() => {
+    if (!loading && !ownerLoading && user && !isBlocked && navigationRef.current?.isReady()) {
       const timer = setTimeout(() => {
         try {
-          // Only navigate if not already on OwnerDashboard
           const currentRoute = navigationRef.current?.getCurrentRoute();
-          if (currentRoute?.name !== 'OwnerDashboard') {
-            console.log('[RootNavigator] Redirecting reviewer/owner to OwnerDashboard');
-            navigationRef.current?.navigate('OwnerDashboard');
+          const routeName = currentRoute?.name as string | undefined;
+          const isOnAuthOrIndex = routeName != null && (AUTH_SCREEN_NAMES.has(routeName) || routeName === 'Index' || (currentRoute?.params as any)?.screen != null);
+
+          if (isOnAuthOrIndex) {
+            const targetName = hasAdminAccess ? 'OwnerDashboard' : 'Main';
+            console.log('[RootNavigator] User logged in, resetting to', targetName, hasAdminAccess ? '(admin)' : '');
+            navigationRef.current?.reset({
+              index: 0,
+              routes: [{ name: targetName }],
+            });
+            if (hasAdminAccess) sentAdminToDashboardRef.current = true;
+          } else if (hasAdminAccess && routeName === 'Main' && !sentAdminToDashboardRef.current) {
+            // owner-check finished after we already landed on Main (e.g. slow network): send admin to OwnerDashboard once
+            sentAdminToDashboardRef.current = true;
+            navigationRef.current?.reset({
+              index: 0,
+              routes: [{ name: 'OwnerDashboard' }],
+            });
           }
         } catch (error) {
-          console.error('[RootNavigator] Failed to navigate reviewer/owner:', error);
+          console.error('[RootNavigator] Post-login reset error:', error);
         }
-      }, 200);
+      }, 150);
       return () => clearTimeout(timer);
     }
   }, [user, loading, ownerLoading, hasAdminAccess, isBlocked]);
@@ -152,7 +194,7 @@ export default function RootNavigator() {
   // Priority 1: Blocked users see BlockedScreen
   if (!loading && isBlocked) {
     return (
-      <NavigationContainer ref={navigationRef} direction="rtl">
+      <NavigationContainer ref={navigationRef} direction="rtl" linking={linking}>
         <Stack.Navigator screenOptions={{ headerShown: false }}>
           <Stack.Screen name="Auth" component={AuthStack} />
           <Stack.Screen name="Index" component={Index} />
@@ -206,11 +248,25 @@ export default function RootNavigator() {
     );
   }
 
+  const appBg = colors.background.DEFAULT;
+
+  const onNavStateChange = () => {
+    try {
+      const route = navigationRef.getCurrentRoute();
+      if (route?.name !== 'OwnerDashboard') {
+        Keyboard.dismiss();
+      }
+    } catch (_) {}
+  };
+
   return (
-    <View style={{ flex: 1 }}>
-      <NavigationContainer ref={navigationRef} direction="rtl">
-      <Stack.Navigator 
-        screenOptions={{ headerShown: false }}
+    <View style={{ flex: 1, backgroundColor: appBg }}>
+      <NavigationContainer ref={navigationRef} direction="rtl" onStateChange={onNavStateChange}>
+      <Stack.Navigator
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: appBg },
+        }}
         initialRouteName={!user ? "Index" : "Main"}
       >
         {!user ? (

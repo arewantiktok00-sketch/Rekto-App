@@ -1,15 +1,14 @@
-import React from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { FileText, ShieldCheck, Receipt, ChevronRight } from 'lucide-react-native';
+import { ScreenHeader } from '@/components/common/ScreenHeader';
+import { Text } from '@/components/common/Text';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { spacing, borderRadius } from '@/theme/spacing';
+import { borderRadius, spacing } from '@/theme/spacing';
 import { getTypographyStyles } from '@/theme/typography';
-import { Text } from '@/components/common/Text';
-import { ScreenHeader } from '@/components/common/ScreenHeader';
 import { iconTransformRTL } from '@/utils/rtl';
+import { useNavigation } from '@react-navigation/native';
+import { ChevronRight, FileText, Receipt, ShieldCheck } from 'lucide-react-native';
+import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export function LegalDocuments() {
   const navigation = useNavigation();
@@ -45,7 +44,7 @@ export function LegalDocuments() {
             return (
               <TouchableOpacity
                 key={item.screen}
-                style={[styles.itemRow, isRTL && styles.rowReverse]}
+                style={styles.itemRow}
                 onPress={() => navigation.navigate(item.screen as never)}
                 activeOpacity={0.8}
               >
@@ -68,9 +67,6 @@ const createStyles = (colors: any, insets: any, typography: any, isRTL?: boolean
   container: {
     flex: 1,
     backgroundColor: colors.background.DEFAULT,
-  },
-  rowReverse: {
-    flexDirection: 'row',
   },
   textRTL: {
     textAlign: 'right',

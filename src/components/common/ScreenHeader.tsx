@@ -1,10 +1,11 @@
+import { BackButton } from '@/components/common/BackButton';
 import { Text } from '@/components/common/Text';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useTheme } from '@/contexts/ThemeContext';
 import { getFontFamily } from '@/utils/getFontFamily';
-import { rtlIcon, rtlRow } from '@/utils/rtl';
-import { Ionicons } from '@expo/vector-icons';
+import { rtlRow } from '@/utils/rtl';
 import React from 'react';
-import { StyleSheet, TouchableOpacity, View, ViewStyle } from 'react-native';
+import { StyleSheet, View, ViewStyle } from 'react-native';
 
 interface ScreenHeaderProps {
   title: string;
@@ -23,31 +24,34 @@ interface ScreenHeaderProps {
  */
 export function ScreenHeader({ title, subtitle, onBack, style, rightElement }: ScreenHeaderProps) {
   const { language, isRTL: rtl } = useLanguage();
+  const { colors, isDark } = useTheme();
   const titleFont = getFontFamily(language as 'ckb' | 'ar', 'bold');
   const subtitleFont = getFontFamily(language as 'ckb' | 'ar', 'regular');
-  const titleAlign = { textAlign: 'center' as const };
+  const titleAlign = { textAlign: rtl ? 'right' as const : 'center' as const };
+  const headerStyles = createStyles(colors, rtl);
 
   return (
-    <View style={[styles.header, rtlRow(), style]}>
-      <TouchableOpacity onPress={onBack} style={styles.backButton} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-        <Ionicons name="chevron-back" size={20} color="#18181B" style={rtlIcon()} />
-      </TouchableOpacity>
-      <View style={styles.titleCenter}>
-        <Text style={[styles.title, { fontFamily: titleFont }, titleAlign, { writingDirection: 'rtl' }]} numberOfLines={1}>
+    <View style={[headerStyles.header, rtlRow(), style]}>
+      <BackButton
+        onPress={onBack}
+        style={[headerStyles.backButton, { borderColor: isDark ? '#27272A' : '#E4E4E7' }]}
+      />
+      <View style={headerStyles.titleCenter}>
+        <Text style={[headerStyles.title, { fontFamily: titleFont }, titleAlign, { writingDirection: 'rtl' }]} numberOfLines={1}>
           {title}
         </Text>
         {subtitle != null && subtitle !== '' ? (
-          <Text style={[styles.subtitle, { fontFamily: subtitleFont }, titleAlign, { writingDirection: 'rtl' }]} numberOfLines={1} ellipsizeMode="tail">
+          <Text style={[headerStyles.subtitle, { fontFamily: subtitleFont }, titleAlign, { writingDirection: 'rtl' }]} numberOfLines={1} ellipsizeMode="tail">
             {subtitle}
           </Text>
         ) : null}
       </View>
-      {rightElement != null ? <View style={[styles.spacer, styles.spacerRight]}>{rightElement}</View> : <View style={styles.spacer} />}
+      {rightElement != null ? <View style={[headerStyles.spacer, headerStyles.spacerRight]}>{rightElement}</View> : <View style={headerStyles.spacer} />}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: any, rtl?: boolean) => StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -56,8 +60,8 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     paddingBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-    backgroundColor: '#FFFFFF',
+    borderBottomColor: colors.border?.DEFAULT ?? '#F1F5F9',
+    backgroundColor: colors.background?.DEFAULT ?? colors.card?.background ?? '#FFFFFF',
     width: '100%',
   },
   backButton: {
@@ -67,7 +71,7 @@ const styles = StyleSheet.create({
     minHeight: 40,
     borderRadius: 12,
     borderWidth: 1.5,
-    borderColor: '#E5E7EB',
+    borderColor: '#E4E4E7',
     backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
@@ -87,15 +91,16 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 8,
   },
   title: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#18181B',
+    color: colors.foreground?.DEFAULT ?? '#18181B',
   },
   subtitle: {
     fontSize: 13,
-    color: '#94A3B8',
+    color: colors.foreground?.muted ?? '#94A3B8',
     marginTop: 2,
   },
 });

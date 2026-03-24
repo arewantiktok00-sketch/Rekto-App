@@ -3,12 +3,12 @@ import { sendPushToUsers } from '@/services/notificationPush';
 import { borderRadius, spacing } from '@/theme/spacing';
 import { inputStyleRTL } from '@/utils/rtl';
 import { toast } from '@/utils/toast';
+import { formatDateNumericDMY } from '@/utils/dateFormat';
 import { Ban, Bell, Mail, Search, UserCheck, Users, UserX, X } from 'lucide-react-native';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
-    Modal,
     ScrollView,
     StyleSheet,
     Text,
@@ -16,6 +16,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
+import { CenterModal } from '@/components/common/CenterModal';
 
 interface User {
   user_id: string;
@@ -66,7 +67,7 @@ export const UserManagementTab: React.FC<UserManagementTabProps> = ({ colors, t 
       setUsers(usersList);
     } catch (err) {
       console.error('Failed to fetch users:', err);
-      toast.error('Error', 'Something went wrong');
+      toast.error(t('error'), t('somethingWentWrong'));
     } finally {
       setLoading(false);
     }
@@ -97,7 +98,7 @@ export const UserManagementTab: React.FC<UserManagementTabProps> = ({ colors, t 
                 if (error) throw error;
                 if (data?.error) throw new Error(data.error);
 
-                toast.success('Success', 'Operation completed');
+                toast.success(t('success'), t('operationCompleted'));
               } else {
                 // Block using owner-content API
                 const { data, error } = await supabase.functions.invoke('owner-content', {
@@ -111,11 +112,11 @@ export const UserManagementTab: React.FC<UserManagementTabProps> = ({ colors, t 
                 if (error) throw error;
                 if (data?.error) throw new Error(data.error);
 
-                toast.success('Success', 'Operation completed');
+                toast.success(t('success'), t('operationCompleted'));
               }
               fetchUsers();
             } catch (err: any) {
-              toast.error('Error', 'Something went wrong');
+              toast.error(t('error'), t('somethingWentWrong'));
             }
           },
         },
@@ -153,10 +154,10 @@ export const UserManagementTab: React.FC<UserManagementTabProps> = ({ colors, t 
                 // Profile is deleted, but auth user might still exist
               }
 
-              toast.success('Success', 'Operation completed');
+              toast.success(t('success'), t('operationCompleted'));
               fetchUsers();
             } catch (err: any) {
-              toast.error('Error', 'Something went wrong');
+              toast.error(t('error'), t('somethingWentWrong'));
             }
           },
         },
@@ -173,7 +174,7 @@ export const UserManagementTab: React.FC<UserManagementTabProps> = ({ colors, t 
 
   const sendNotification = async () => {
     if (!selectedUser || !notificationTitle.trim() || !notificationBody.trim()) {
-      toast.error('Error', 'Something went wrong');
+      toast.error(t('error'), t('somethingWentWrong'));
       return;
     }
 
@@ -199,11 +200,11 @@ export const UserManagementTab: React.FC<UserManagementTabProps> = ({ colors, t 
         tag: 'owner-notification',
       });
 
-      toast.success('Success', 'Operation completed');
+      toast.success(t('success'), t('operationCompleted'));
       setShowNotifyModal(false);
       setSelectedUser(null);
     } catch (err: any) {
-      toast.error('Error', 'Something went wrong');
+      toast.error(t('error'), t('somethingWentWrong'));
     }
   };
 
@@ -291,11 +292,11 @@ export const UserManagementTab: React.FC<UserManagementTabProps> = ({ colors, t 
                     <View style={styles.userContactRow}>
                       <Mail size={12} color={colors.foreground.muted} />
                       <Text style={styles.userEmail} numberOfLines={1}>
-                        {user.email || user.phone_number || 'No contact'}
+                        {user.email || user.phone_number || t('noContact')}
                       </Text>
                     </View>
                     <Text style={styles.userJoined}>
-                      Joined {new Date(user.created_at).toLocaleDateString()}
+                      {t('joined')} {formatDateNumericDMY(new Date(user.created_at))}
                     </Text>
                   </View>
                   <View
@@ -353,10 +354,13 @@ export const UserManagementTab: React.FC<UserManagementTabProps> = ({ colors, t 
         )}
       </ScrollView>
 
-      {/* Notify Modal */}
-      <Modal visible={showNotifyModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+      {/* Notify Modal — centered, keyboard-aware */}
+      <CenterModal
+        visible={showNotifyModal}
+        onRequestClose={() => setShowNotifyModal(false)}
+        keyboardAware
+      >
+        <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Send Notification</Text>
               <TouchableOpacity onPress={() => setShowNotifyModal(false)}>
@@ -404,9 +408,8 @@ export const UserManagementTab: React.FC<UserManagementTabProps> = ({ colors, t 
                 <Text style={styles.sendButtonText}>Send</Text>
               </TouchableOpacity>
             </View>
-          </View>
         </View>
-      </Modal>
+      </CenterModal>
     </View>
   );
 };

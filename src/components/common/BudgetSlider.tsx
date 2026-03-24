@@ -1,12 +1,30 @@
 import { Text } from '@/components/common/Text';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { formatUSDEnglish } from '@/utils/currency';
-import { getFontFamily } from '@/utils/getFontFamily';
-import { ltrNumber, rtlIcon } from '@/utils/rtl';
-import Slider from '@react-native-community/slider';
+import { AdaptiveSlider } from '@/components/common/AdaptiveSlider';
 import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
+
+/**
+ * Non-linear visual mapping for budget slider (matches web).
+ * $10 → 0%, $20 → 12%, $21–$100 → linear 12% to 100%.
+ */
+export function getVisualPercentage(val: number): number {
+  if (val <= 10) return 0;
+  if (val === 20) return 12;
+  if (val >= 100) return 100;
+  const range = 100 - 21;
+  const position = val - 21;
+  return 12 + (position / range) * 88;
+}
+
+function visualToValue(visualPercent: number, tenDollarEnabled: boolean): number {
+  if (visualPercent <= 0) return tenDollarEnabled ? 10 : 20;
+  if (visualPercent < 12) return 20;
+  if (visualPercent >= 100) return 100;
+  const t = (visualPercent - 12) / 88;
+  return Math.round(21 + t * 79);
+}
 
 interface BudgetSliderProps {
   value: number;
@@ -20,216 +38,104 @@ interface BudgetSliderProps {
 export const BudgetSlider: React.FC<BudgetSliderProps> = ({
   value,
   onChange,
-  budgetValues,
   tenDollarEnabled,
-  isRTL = false,
   language: languageProp,
+  isRTL,
 }) => {
   const { colors } = useTheme();
-  const { t, language: contextLang } = useLanguage();
+  const { language: contextLang } = useLanguage();
   const language = (languageProp ?? contextLang) as 'ckb' | 'ar';
-  const isCkbAr = language === 'ckb' || language === 'ar';
-  const styles = createStyles(colors, isRTL, language);
-  const getAmountLabel = (v: number) => (isCkbAr ? (v === 10 ? t('amount10USD') : v === 20 ? t('amount20USD') : v === 100 ? t('amount100USD') : formatUSDEnglish(v)) : formatUSDEnglish(v));
+  const styles = createStyles(colors, language, isRTL ?? false);
 
-  const getNearestBudgetValue = (val: number) => {
-    if (budgetValues.length === 0) return val;
-    return budgetValues.reduce((closest, current) =>
-      Math.abs(current - val) < Math.abs(closest - val) ? current : closest,
-    budgetValues[0]);
+  const visualPercent = getVisualPercentage(value);
+
+  const handleSliderChange = (visual: number) => {
+    const budget = visualToValue(visual, tenDollarEnabled);
+    if (budget !== value) onChange(budget);
   };
-
-  const getVisualPercentage = (val: number): number => {
-    if (val <= 10) return 0;
-    if (val === 20) return 12;
-    if (val >= 100) return 100;
-    return 12 + ((val - 21) / 79) * 88;
-  };
-
-  const getValueFromVisualPosition = (percent: number): number => {
-    const clamped = Math.max(0, Math.min(100, percent));
-
-    if (tenDollarEnabled && clamped <= 6) return 10;
-    if (clamped <= 12) return 20;
-    if (clamped >= 99) return 100;
-
-    const normalized = (clamped - 12) / 88;
-    return Math.round(21 + normalized * 79);
-  };
-
-  const normalizedValue = getNearestBudgetValue(value);
-  const visualPercentage = getVisualPercentage(normalizedValue);
-
-  // Quick select; row order is mirrored natively in RTL
-  const quickValues = tenDollarEnabled ? [10, 20, 100] : [20, 100];
-
-  const markers = [
-    { value: 10, percent: 0, visible: tenDollarEnabled },
-    { value: 20, percent: 12, visible: true },
-    { value: 100, percent: 100, visible: true },
-  ].filter(marker => marker.visible);
 
   return (
     <View style={styles.container}>
-      {/* Quick Select Buttons — RTL: mirror order (100, 20, 10) with spacing */}
       <View style={styles.quickSelectRow}>
-        {quickValues.map((v) => (
+        <View style={styles.quickLeft}>
+          {tenDollarEnabled && (
+            <Pressable
+              onPress={() => onChange(10)}
+              style={[styles.quickChip, value === 10 && styles.quickChipActive]}
+            >
+              <Text style={[styles.quickText, value === 10 && styles.quickTextActive, { writingDirection: 'ltr' }]}>$10</Text>
+            </Pressable>
+          )}
           <Pressable
-            key={v}
-            onPress={() => onChange(v)}
-            style={[
-              styles.quickButton,
-              value === v && styles.quickButtonActive,
-            ]}
+            onPress={() => onChange(20)}
+            style={[styles.quickChip, value === 20 && styles.quickChipActive]}
           >
-            <Text style={[
-              styles.quickButtonText,
-              value === v && styles.quickButtonTextActive,
-              ltrNumber,
-            ]}>
-              {getAmountLabel(v)}
-            </Text>
+            <Text style={[styles.quickText, value === 20 && styles.quickTextActive, { writingDirection: 'ltr' }]}>$20</Text>
           </Pressable>
-        ))}
+        </View>
+        <Pressable
+          onPress={() => onChange(100)}
+          style={[styles.quickChip, value === 100 && styles.quickChipActive]}
+        >
+          <Text style={[styles.quickText, value === 100 && styles.quickTextActive, { writingDirection: 'ltr' }]}>$100</Text>
+        </Pressable>
       </View>
 
-      {/* Slider + markers: RTL mirror track; labels stay LTR and un-flipped */}
-      <View style={[styles.sliderAndMarkersWrap, isRTL && styles.sliderAndMarkersWrapRTL]}>
-        <Slider
-          style={styles.slider}
-          minimumValue={0}
-          maximumValue={100}
-          step={0.1}
-          value={visualPercentage}
-          onValueChange={(raw) => onChange(getValueFromVisualPosition(raw))}
-          onSlidingComplete={(raw) => onChange(getValueFromVisualPosition(raw))}
-          minimumTrackTintColor={colors.primary.DEFAULT}
-          maximumTrackTintColor={colors.border.DEFAULT}
-          thumbTintColor={colors.primary.DEFAULT}
-        />
-        <View style={styles.markersRow}>
-          {markers.map((marker) => (
-            <Pressable
-              key={marker.value}
-              onPress={() => onChange(marker.value)}
-              style={[
-                styles.markerWrapper,
-                marker.percent === 0 ? { start: 0, end: undefined, alignItems: 'flex-start' as const } : undefined,
-                marker.percent === 100 ? { end: 0, start: undefined, alignItems: 'flex-end' as const } : undefined,
-                marker.percent > 0 && marker.percent < 100
-                  ? { start: `${marker.percent}%`, end: undefined, marginStart: -10, alignItems: 'center' as const }
-                  : undefined,
-              ]}
-            >
-              <View
-                style={[
-                  styles.markerDot,
-                  value === marker.value && styles.markerDotActive,
-                ]}
-              />
-              {/* Un-flip label when parent is scaleX:-1 so numbers read LTR */}
-              <View style={rtlIcon()}>
-                <Text
-                  style={[
-                    styles.markerLabel,
-                    value === marker.value && styles.markerLabelActive,
-                    ltrNumber,
-                  ]}
-                >
-                  {getAmountLabel(marker.value)}
-                </Text>
-              </View>
-            </Pressable>
-          ))}
-        </View>
-      </View>
+      <AdaptiveSlider
+        minimumValue={0}
+        maximumValue={100}
+        step={0.5}
+        value={visualPercent}
+        onValueChange={handleSliderChange}
+        minimumTrackTintColor={colors.primary?.DEFAULT ?? '#7C3AED'}
+        maximumTrackTintColor={colors.border?.DEFAULT ?? '#E4E4E7'}
+        thumbTintColor={colors.primary?.DEFAULT ?? '#7C3AED'}
+        style={styles.slider}
+      />
     </View>
   );
 };
 
-const createStyles = (colors: any, isRTL?: boolean, language?: 'ckb' | 'ar') => {
-  const lang = language ?? 'ckb';
-  const fontSemibold = getFontFamily(lang, 'semibold');
-  const fontMedium = getFontFamily(lang, 'medium');
-  const rowDir = 'row';
+const createStyles = (colors: any, _language?: 'ckb' | 'ar', isRTL?: boolean) => {
   return StyleSheet.create({
-  container: {
-    gap: 12,
-  },
-  quickSelectRow: {
-    flexDirection: rowDir,
-    gap: 24,
-    justifyContent: 'flex-start',
-  },
-  quickSelectRowRTL: {
-    flexDirection: 'row',
-    justifyContent: 'flex-start',
-  },
-  quickButton: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 12,
-    backgroundColor: colors.background.secondary || '#27272A',
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  quickButtonActive: {
-    backgroundColor: colors.primary.DEFAULT,
-    borderColor: colors.primary.DEFAULT,
-  },
-  quickButtonText: {
-    fontSize: 16,
-    fontFamily: fontSemibold,
-    color: colors.foreground.muted || '#A1A1AA',
-  },
-  quickButtonTextActive: {
-    color: colors.primary.foreground,
-  },
-  sliderAndMarkersWrap: {
-    width: '100%',
-  },
-  sliderAndMarkersWrapRTL: {
-    transform: [{ scaleX: -1 }],
-  },
-  slider: {
-    width: '100%',
-    height: 40,
-  },
-  markersRow: {
-    position: 'relative',
-    height: 32,
-    marginTop: 4,
-    overflow: 'hidden',
-    width: '100%',
-  },
-  markerWrapper: {
-    position: 'absolute',
-    flexDirection: rowDir,
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 6,
-  },
-  markerDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: colors.border.DEFAULT,
-    borderWidth: 2,
-    borderColor: colors.border.DEFAULT,
-  },
-  markerDotActive: {
-    backgroundColor: colors.primary.DEFAULT,
-    borderColor: colors.primary.DEFAULT,
-  },
-  markerLabel: {
-    marginTop: 4,
-    fontSize: 12,
-    fontFamily: fontMedium,
-    color: colors.foreground.muted || '#71717A',
-  },
-  markerLabelActive: {
-    color: colors.primary.DEFAULT,
-    fontWeight: '600',
-  },
-});
+    container: {
+      width: '100%',
+      marginTop: 4,
+    },
+    quickSelectRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 8,
+    },
+    quickLeft: {
+      flexDirection: 'row',
+      gap: 12,
+      alignItems: 'center',
+    },
+    quickChip: {
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: '#E4E4E7',
+      backgroundColor: colors.background?.secondary ?? '#F4F4F5',
+    },
+    quickChipActive: {
+      borderColor: '#C4B5FD',
+      backgroundColor: '#EDE9FE',
+    },
+    quickText: {
+      color: '#71717A',
+      fontSize: 14,
+      fontFamily: 'Poppins-SemiBold',
+    },
+    quickTextActive: {
+      color: '#7C3AED',
+    },
+    slider: {
+      width: '100%',
+      height: 40,
+    },
+  });
 };

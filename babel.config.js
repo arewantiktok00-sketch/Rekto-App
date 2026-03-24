@@ -1,15 +1,21 @@
-module.exports = function(api) {
+const path = require('path');
+
+// Always resolve from this config file's directory (project root). Do NOT use cwd -
+// when building from Xcode or ios/, cwd can be ios/ and @ would wrongly become ios/src.
+const projectRoot = path.resolve(__dirname, '.');
+
+module.exports = function (api) {
   api.cache(true);
   return {
-    presets: ['babel-preset-expo'],
+    presets: ['module:@react-native/babel-preset'],
     plugins: [
       [
         'module-resolver',
         {
-          root: ['./'],
+          root: [projectRoot],
           extensions: ['.ios.js', '.android.js', '.js', '.ts', '.tsx', '.json'],
           alias: {
-            '@': './src',
+            '@': path.join(projectRoot, 'src'),
           },
         },
       ],

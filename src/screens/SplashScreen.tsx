@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, Image, Dimensions } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { View, StyleSheet, Image, Dimensions, StatusBar } from 'react-native';
 import { useTheme } from '@/contexts/ThemeContext';
 import Animated, {
   useSharedValue,
@@ -13,15 +12,16 @@ import Animated, {
 } from 'react-native-reanimated';
 import Svg, { Path, Defs, LinearGradient, Stop } from 'react-native-svg';
 
-const { width, height } = Dimensions.get('window');
+// Full physical screen so splash fills under status bar and home indicator
+const { width, height } = Dimensions.get('screen');
 
 interface SplashScreenProps {
   onFinish: () => void;
 }
 
 export function SplashScreen({ onFinish }: SplashScreenProps) {
-  const insets = useSafeAreaInsets();
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
+  const logoSource = isDark ? require('../../assets/images/iconDarkmode.png') : require('../../assets/images/logo.png');
   const waveOffset = useSharedValue(0);
   const fillProgress = useSharedValue(0);
   const logoScale = useSharedValue(0.8);
@@ -113,22 +113,24 @@ export function SplashScreen({ onFinish }: SplashScreenProps) {
   }, []);
 
   const fillAnimatedStyle = useAnimatedStyle(() => {
-    return {
-      opacity: fillProgress.value,
-    };
+    const opacity = typeof fillProgress.value === 'number' ? fillProgress.value : 1;
+    return { opacity };
   });
 
   const logoAnimatedStyle = useAnimatedStyle(() => {
+    const scale = typeof logoScale.value === 'number' ? logoScale.value : 1;
+    const opacity = typeof logoOpacity.value === 'number' ? logoOpacity.value : 1;
     return {
-      transform: [{ scale: logoScale.value }],
-      opacity: logoOpacity.value,
+      transform: [{ scale }],
+      opacity,
     };
   });
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top, backgroundColor: colors.background.DEFAULT }]}>
-      {/* Background */}
-      <View style={[styles.background, { backgroundColor: colors.background.DEFAULT }]} />
+    <>
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <View style={[styles.container, styles.fullScreen, { width, height, backgroundColor: colors.background.DEFAULT }]}>
+        <View style={[styles.backgroundFill, { backgroundColor: colors.background.DEFAULT }]} />
 
       {/* Liquid Fill Wave */}
       <Animated.View style={[styles.waveContainer, fillAnimatedStyle]}>
@@ -149,28 +151,33 @@ export function SplashScreen({ onFinish }: SplashScreenProps) {
         </Svg>
       </Animated.View>
 
-      {/* Logo - Centered */}
+      {/* Logo - Centered (dark mode uses iconDarkmode) */}
       <Animated.View style={[styles.logoContainer, logoAnimatedStyle]}>
         <Image
-          source={require('../../assets/images/icon.png')}
+          source={logoSource}
           style={styles.logo}
           resizeMode="contain"
         />
       </Animated.View>
-    </View>
+      </View>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
-    backgroundColor: 'transparent',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  background: {
+  fullScreen: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  backgroundFill: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'transparent',
   },
   waveContainer: {
     ...StyleSheet.absoluteFillObject,

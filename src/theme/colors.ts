@@ -16,16 +16,16 @@ export const colors = {
       tertiary: '#F4F4F5',     // Elevated surfaces
     },
 
-    // Foreground (Text) Colors
+    // Foreground (Text) Colors — light mode
     foreground: {
-      DEFAULT: '#18181B',      // Primary text
-      muted: '#71717A',        // Secondary text
+      DEFAULT: '#111827',      // Primary text (dark on light bg)
+      muted: '#6B7280',        // Secondary text
       subtle: '#A1A1AA',       // Tertiary text
     },
 
     // Border Colors
     border: {
-      DEFAULT: '#E4E4E7',      // Default borders
+      DEFAULT: '#E5E7EB',      // Default borders
       light: '#F4F4F5',        // Light borders
       focus: '#7C3AED',        // Focus state border
     },
@@ -58,16 +58,16 @@ export const colors = {
 
     // Input Colors
     input: {
-      background: '#E4E4E7',
-      border: '#E4E4E7',
+      background: '#FFFFFF',
+      border: '#E5E7EB',
       borderFocus: '#7C3AED',
-      placeholder: '#71717A',
+      placeholder: '#6B7280',
     },
 
     // Card Colors
     card: {
       background: '#FFFFFF',
-      border: '#E4E4E7',
+      border: '#E5E7EB',
     },
 
     // Gradients

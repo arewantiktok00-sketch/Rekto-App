@@ -7,7 +7,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { spacing, borderRadius } from '@/theme/spacing';
 import { AlertTriangle, LogOut, Mail, MessageCircle } from 'lucide-react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import LinearGradient from 'react-native-linear-gradient';
 import { Text } from '@/components/common/Text';
 
 interface BlockedScreenProps {
@@ -140,7 +140,7 @@ export function BlockedScreen({ reason: routeReason }: BlockedScreenProps) {
               colors={['#7C3AED', '#9333EA']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
-              style={[styles.gradientButton, isRTL && styles.rowReverse]}
+              style={styles.gradientButton}
             >
               <MessageCircle size={18} color={colors.primary.foreground} style={{ marginEnd: 8 }} />
               <Text style={[styles.primaryButtonText, isRTL && styles.textRTL]}>Contact Support</Text>
@@ -148,7 +148,7 @@ export function BlockedScreen({ reason: routeReason }: BlockedScreenProps) {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.secondaryButton, isRTL && styles.rowReverse]}
+            style={styles.secondaryButton}
             onPress={handleEmailSupport}
             activeOpacity={0.8}
           >
@@ -157,7 +157,7 @@ export function BlockedScreen({ reason: routeReason }: BlockedScreenProps) {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.logoutButton, isRTL && styles.rowReverse]}
+            style={styles.logoutButton}
             onPress={handleLogout}
             activeOpacity={0.8}
           >
@@ -188,9 +188,6 @@ const createStyles = (colors: any, insets: any, isRTL?: boolean) => StyleSheet.c
     paddingEnd: 24,
     paddingTop: insets.top + 20,
     paddingBottom: insets.bottom + 20,
-  },
-  rowReverse: {
-    flexDirection: 'row',
   },
   textRTL: {
     textAlign: 'right',

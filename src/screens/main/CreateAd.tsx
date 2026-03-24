@@ -1,4 +1,3 @@
-import { BudgetSlider } from '@/components/common/BudgetSlider';
 import { ScreenHeader } from '@/components/common/ScreenHeader';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -9,20 +8,24 @@ import { borderRadius, spacing } from '@/theme/spacing';
 import { getFontFamily, getSemiBoldStyle, getTypographyStyles } from '@/theme/typography';
 import { getFontFamilyWithWeight } from '@/utils/fonts';
 import { toast } from '@/utils/toast';
-import Slider from '@react-native-community/slider';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { AlertTriangle, Calendar, Check, CheckCircle2, ChevronDown, ChevronUp, Clock, Eye, Info, Link2, MessageCircle, PhoneCall, Rocket, Tag, Target, X, Zap } from 'lucide-react-native';
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import { AlertTriangle, Calendar, Check, CheckCircle2, ChevronDown, ChevronUp, Eye, Info, Link2, MessageCircle, PhoneCall, Rocket, Tag, Target, X, Zap } from 'lucide-react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Modal, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // @ts-ignore - DateTimePicker types may not be perfect
+import { AdaptiveSlider } from '@/components/common/AdaptiveSlider';
+import { BudgetSlider } from '@/components/common/BudgetSlider';
 import { Text } from '@/components/common/Text';
 import { useAppSettingsRealtime } from '@/hooks/useAppSettingsRealtime';
+import { usePricingConfig } from '@/hooks/usePricingConfig';
+import { BUDGET_SLIDER_VALUES } from '@/lib/pricing';
 import { getCached } from '@/services/globalCache';
 import { AppliedDiscount, PricingBreakdown, PricingSettings } from '@/types/pricing';
-import { formatIQD, formatUSDEnglish } from '@/utils/currency';
-import { isRTL, ltrNumber, rtlIcon, rtlInput, rtlText } from '@/utils/rtl';
+import { formatIQDEnglish, formatUSDEnglish } from '@/utils/currency';
+import { getNumberFontFamily } from '@/utils/getFontFamily';
+import { isRTL, ltrNumber, rtlInput, rtlText } from '@/utils/rtl';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
 const ageRanges = [
@@ -70,15 +73,18 @@ export function CreateAd() {
   const route = useRoute();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  const { settings: config, refetch: refetchConfig } = useRemoteConfig();
+  const { settings: config, refetch: refetchConfig, isFeatureEnabled, isPaymentsHidden } = useRemoteConfig();
   const { t, language } = useLanguage();
   const rtl = isRTL(language);
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const typography = getTypographyStyles(language as 'ckb' | 'ar');
   const fontFamily = getFontFamily(language as 'ckb' | 'ar');
   const semiBoldStyle = getSemiBoldStyle(language as 'ckb' | 'ar');
   const styles = createStyles(colors, insets, typography, fontFamily, semiBoldStyle, rtl, language as 'ckb' | 'ar');
-  
+  const numberFont = getNumberFontFamily('semibold');
+  const fgColor = colors.foreground?.DEFAULT ?? '#111827';
+  const fgMutedColor = colors.foreground?.muted ?? '#6B7280';
+
   // Get route params for prefill (using snake_case to match database fields)
   // Boost Again prefill interface - includes video_url and destination_url for pre-filling
   interface BoostAgainPrefill {
@@ -111,6 +117,23 @@ export function CreateAd() {
 
   // Show disabled state if ad creation is disabled
   const isDisabled = config && !config.features?.ad_creation_enabled;
+  useEffect(() => {
+    if (!isFeatureEnabled('ad_creation_enabled')) {
+      const goToSafeScreen = () => {
+        const nav = navigation as any;
+        if (typeof nav.canGoBack === 'function' && nav.canGoBack()) {
+          nav.goBack();
+          return;
+        }
+        nav.navigate('Dashboard');
+      };
+      Alert.alert(
+        t('featureDisabledTitle'),
+        t('adCreationDisabled'),
+        [{ text: t('done'), onPress: goToSafeScreen }]
+      );
+    }
+  }, [isFeatureEnabled, navigation, t]);
 
   // Get objective settings with defaults
   const objectiveSettings = config?.objectives ?? {
@@ -128,6 +151,8 @@ export function CreateAd() {
   });
 
   // Form state - initialize with prefill if available (using snake_case from prefill)
+  const cachedSettings = getCached<any>('app_settings', null);
+  const cachedPricing = cachedSettings?.value?.pricing || cachedSettings?.pricing || null;
   const [objective, setObjective] = useState(prefill?.objective || '');
   const [targetAudience, setTargetAudience] = useState<'' | 'all' | 'arab' | 'kurdish'>(prefill?.target_audience as '' | 'all' | 'arab' | 'kurdish' || '');
   const [selectedAgeRanges, setSelectedAgeRanges] = useState<string[]>([]);
@@ -146,6 +171,7 @@ export function CreateAd() {
   const [selectedShareCode, setSelectedShareCode] = useState<string>('');
   const [isCheckoutExpanded, setIsCheckoutExpanded] = useState(false);
   const [showLinkDropdown, setShowLinkDropdown] = useState(false);
+  const scrollRef = useRef<ScrollView>(null);
   
   // Date/Time scheduling state
   const [scheduledDate, setScheduledDate] = useState<Date>(() => {
@@ -157,29 +183,24 @@ export function CreateAd() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
 
-  // Pricing settings and discount code state
-  const cachedSettings = getCached<any>('app_settings', null);
-  const cachedPricing = cachedSettings?.value?.pricing || cachedSettings?.pricing || null;
+  // Dynamic pricing from app_settings (pricing_config or global) — no hardcoded rate
+  const pricingConfig = usePricingConfig();
+  const DEFAULT_TAX_TABLE = pricingConfig.tax_table;
+  const DEFAULT_PRICING = {
+    exchange_rate: pricingConfig.exchange_rate,
+    ten_dollar_ads_enabled: pricingConfig.ten_dollar_ads_enabled,
+    tax_table: DEFAULT_TAX_TABLE
+  };
+
   const [pricingSettings, setPricingSettings] = useState<PricingSettings>({
-    exchange_rate: cachedPricing?.exchange_rate ?? 1450,
+    exchange_rate: cachedPricing?.exchange_rate ?? pricingConfig.exchange_rate,
     tax_percentage: 0,
-    ten_dollar_ads_enabled: cachedPricing?.ten_dollar_ads_enabled ?? true
+    ten_dollar_ads_enabled: cachedPricing?.ten_dollar_ads_enabled ?? pricingConfig.ten_dollar_ads_enabled,
+    tax_table: (cachedPricing?.tax_table as Record<number, number>) ?? DEFAULT_TAX_TABLE
   });
   const [discountCode, setDiscountCode] = useState('');
   const [appliedDiscount, setAppliedDiscount] = useState<AppliedDiscount | null>(null);
   const [isValidatingCode, setIsValidatingCode] = useState(false);
-
-  // Default tax table
-  const DEFAULT_TAX_TABLE: Record<number, number> = {
-    10: 3.3, 20: 5.4, 30: 8.1, 40: 8.4, 50: 10.5,
-    60: 12.6, 70: 14.7, 80: 16.8, 90: 18.9, 100: 21
-  };
-
-  const DEFAULT_PRICING = {
-    exchange_rate: 1450,
-    ten_dollar_ads_enabled: true,
-    tax_table: DEFAULT_TAX_TABLE
-  };
 
   // Realtime: refresh app settings + update pricing immediately
   useAppSettingsRealtime({
@@ -201,13 +222,10 @@ export function CreateAd() {
     },
   });
 
-  // Budget values arrays
-  const BUDGET_VALUES = [10, 20, ...Array.from({ length: 80 }, (_, i) => 21 + i)]; // 10, 20, 21...100
-  
-  // Filter based on toggle - check for explicit false
+  // Budget values from pricing.ts; filter $10 when ten_dollar_ads_enabled is false
   const availableBudgets = pricingSettings.ten_dollar_ads_enabled === false
-    ? BUDGET_VALUES.filter(v => v !== 10)
-    : BUDGET_VALUES;
+    ? BUDGET_SLIDER_VALUES.filter((v) => v !== 10)
+    : BUDGET_SLIDER_VALUES;
 
   // Fetch pricing settings and discount toggle on mount
   useEffect(() => {
@@ -345,7 +363,7 @@ export function CreateAd() {
         toast.success(t('discountApplied'), data.discount_type === 'percentage' ? t('discountPercentOff', { value: data.discount_value }) : t('discountAmountOff', { amount: formatUSDEnglish(data.discount_value) }));
       } else {
         // Show the EXACT error from backend
-        toast.error(t('invalidCode'), data?.error || t('invalidDiscountCode'));
+        toast.error(t('error'), t('invalidDiscountCode'));
         setAppliedDiscount(null);
       }
     } catch (err: any) {
@@ -1022,34 +1040,21 @@ export function CreateAd() {
         amount: baseBudget, // ✅ BASE ONLY - no tax
         status: 'pending',
         payment_method: 'FIB',
-        description: `${campaignName} campaign (pending approval)`,
+        description: `${campaignName} - ${t('campaignPendingApprovalDescription') || 'Campaign - Pending approval'}`,
       });
 
       // Notify owners about the new ad submission (in-app + push with user display name)
       try {
         const { data: profile } = await supabase.from('profiles').select('full_name').eq('user_id', user.id).maybeSingle();
         const userDisplayName = profile?.full_name || user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User';
-
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.access_token) {
-          const supabaseUrl = supabase.supabaseUrl;
-          const supabaseKey = supabase.supabaseKey;
-
-          await fetch(`${supabaseUrl}/functions/v1/notify-owners-new-ad`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'apikey': supabaseKey,
-              'Authorization': `Bearer ${session.access_token}`,
-            },
-            body: JSON.stringify({
-              campaign_id: campaignData.id,
-              campaign_title: campaignName.trim(),
-              user_id: user.id,
-              user_display_name: userDisplayName,
-            }),
-          });
-        }
+        await supabase.functions.invoke('notify-owners-new-ad', {
+          body: {
+            campaign_id: campaignData.id,
+            campaign_title: campaignName.trim(),
+            user_id: user.id,
+            user_display_name: userDisplayName,
+          },
+        });
       } catch (e) {
         console.warn('Notify owners failed:', e);
         // Don't fail the submission if notification fails
@@ -1057,10 +1062,15 @@ export function CreateAd() {
 
       toast.success(t('submitted'), t('yourCampaignSubmitted'));
 
-      navigation.navigate('Main', { screen: 'Campaigns' });
+      // After successful creation, send user to the Campaign Detail screen
+      // so they can see the 3-step progress tracker and status.
+      if (campaignData?.id) {
+        navigation.navigate('CampaignDetail' as never, { id: campaignData.id } as never);
+      } else {
+        navigation.navigate('Main', { screen: 'Campaigns' });
+      }
     } catch (error: any) {
-      const message = error?.message ?? error?.error ?? error?.data?.message ?? t('failedToSubmitCampaign');
-      toast.error(t('error'), typeof message === 'string' ? message : t('failedToSubmitCampaign'));
+      toast.error(t('error'), t('failedToSubmitCampaign'));
     } finally {
       setLoading(false);
     }
@@ -1081,7 +1091,7 @@ export function CreateAd() {
   };
 
   const RequiredWarning = () => (
-    <View style={[styles.requiredWarning, rtl && styles.requiredWarningRTL]}>
+    <View style={styles.requiredWarning}>
       <AlertTriangle size={14} color="#EF4444" />
       <Text style={[styles.requiredText, rtlText()]}>{t('required')}</Text>
     </View>
@@ -1106,20 +1116,20 @@ export function CreateAd() {
   }
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={{ flex: 1 }}
-    >
     <View style={styles.container}>
       <ScreenHeader title={t('createAd') || 'Create Ad'} onBack={() => navigation.goBack()} style={{ paddingTop: insets.top + 16 }} />
 
       <ScrollView
+        ref={scrollRef}
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 200 }}
+        contentContainerStyle={{
+          paddingBottom: insets.bottom + 220,
+        }}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
       >
-        <View style={[styles.scrollContentWrap, rtl && styles.scrollContentWrapRTL]}>
+        <View style={styles.scrollContentWrap}>
         {/* Prefill Banner - Show when settings are copied from previous campaign */}
         {prefill && (
           <View style={styles.prefillBanner}>
@@ -1130,14 +1140,16 @@ export function CreateAd() {
           </View>
         )}
 
-        {/* Choose Your Objective Section */}
+        {/* Choose Your Objective — RTL: label right (first), required * + warning left (second) */}
         <View style={styles.section}>
-          <View style={[styles.sectionHeader, rtl && styles.sectionHeaderRowReverse]}>
-            <View style={[styles.titleWithRequiredRow, rtl && styles.titleWithRequiredRowRTL]}>
+          <View style={styles.sectionHeader}>
+            <View style={styles.sectionHeaderTitleWrap}>
               <Text style={[styles.sectionTitle, styles.sectionTitleRTL, rtlText()]}>{t('createAdChooseObjective')}</Text>
-              <Text style={styles.asterisk}>*</Text>
             </View>
-            {!objective && <RequiredWarning />}
+            <View style={styles.requiredLeftBlock}>
+              <Text style={styles.asterisk}>*</Text>
+              {!objective && <RequiredWarning />}
+            </View>
           </View>
           {availableObjectives.map((obj) => {
             const Icon = obj.icon;
@@ -1145,7 +1157,7 @@ export function CreateAd() {
             return (
               <TouchableOpacity
                 key={obj.id}
-                style={[styles.objectiveCard, isSelected && styles.objectiveCardSelected, rtl && styles.objectiveCardRowReverse]}
+                style={[styles.objectiveCard, isSelected && styles.objectiveCardSelected]}
                 onPress={() => setObjective(obj.id)}
                 activeOpacity={0.85}
               >
@@ -1189,19 +1201,21 @@ export function CreateAd() {
           </TouchableOpacity>
         </View>
 
-        {/* Target Audience Section */}
+        {/* Target Audience — label right, required left */}
         <View style={styles.section}>
-          <View style={[styles.sectionHeader, rtl && styles.sectionHeaderRowReverse]}>
-            <View style={[styles.titleWithRequiredRow, rtl && styles.titleWithRequiredRowRTL]}>
+          <View style={styles.sectionHeader}>
+            <View style={styles.sectionHeaderTitleWrap}>
               <Text style={[styles.sectionTitle, styles.sectionTitleRTL, rtlText()]}>{t('targetAudience')}</Text>
-              <Text style={styles.asterisk}>*</Text>
             </View>
-            {!targetAudience && <RequiredWarning />}
+            <View style={styles.requiredLeftBlock}>
+              <Text style={styles.asterisk}>*</Text>
+              {!targetAudience && <RequiredWarning />}
+            </View>
           </View>
 
           {/* Region Selection */}
           <Text style={[styles.subsectionLabel, rtlText()]}>{t('createAdSelectTargetAudience')}</Text>
-          <View style={[styles.buttonRow, rtl && styles.buttonRowReverse]}>
+          <View style={styles.buttonRow}>
             {['all', 'arab', 'kurdish'].map((aud) => (
               <TouchableOpacity
                 key={aud}
@@ -1216,15 +1230,20 @@ export function CreateAd() {
           </View>
           {!targetAudience && <RequiredWarning />}
 
-          {/* Age Range Selection */}
-          <View style={[styles.titleWithRequiredRow, rtl && styles.titleWithRequiredRowRTL, { marginTop: spacing.lg }]}>
-            <Text style={[styles.subsectionLabelInRow, rtlText()]}>{t('createAdAgeRange')}</Text>
-            <Text style={styles.asterisk}>*</Text>
+          {/* Age Range — label right, required left */}
+          <View style={[styles.sectionHeader, { marginTop: spacing.lg }]}>
+            <View style={styles.sectionHeaderTitleWrap}>
+              <Text style={[styles.subsectionLabelInRow, rtlText()]}>{t('createAdAgeRange')}</Text>
+            </View>
+            <View style={styles.requiredLeftBlock}>
+              <Text style={styles.asterisk}>*</Text>
+              {selectedAgeRanges.length === 0 && <RequiredWarning />}
+            </View>
           </View>
           <Text style={[styles.hintText, rtlText()]}>
             {t('createAdAgeRangeHint')}
           </Text>
-          <View style={[styles.ageGrid, rtl && styles.ageGridRTL]}>
+          <View style={styles.ageGrid}>
             {ageRanges.map((range) => (
               <TouchableOpacity
                 key={range.label}
@@ -1246,15 +1265,19 @@ export function CreateAd() {
               </TouchableOpacity>
             ))}
           </View>
-          {selectedAgeRanges.length === 0 && <RequiredWarning />}
 
-          {/* Gender Selection */}
-          <View style={[styles.titleWithRequiredRow, rtl && styles.titleWithRequiredRowRTL, { marginTop: spacing.lg }]}>
-            <Text style={[styles.subsectionLabelInRow, rtlText()]}>{t('gender')}</Text>
-            <Text style={styles.asterisk}>*</Text>
+          {/* Gender — label right, required left */}
+          <View style={[styles.sectionHeader, { marginTop: spacing.lg }]}>
+            <View style={styles.sectionHeaderTitleWrap}>
+              <Text style={[styles.subsectionLabelInRow, rtlText()]}>{t('gender')}</Text>
+            </View>
+            <View style={styles.requiredLeftBlock}>
+              <Text style={styles.asterisk}>*</Text>
+              {!gender && <RequiredWarning />}
+            </View>
           </View>
           <Text style={[styles.hintText, rtlText()]}>{t('createAdSelectGender')}</Text>
-          <View style={[styles.buttonRow, rtl && styles.buttonRowReverse]}>
+          <View style={styles.buttonRow}>
             {['all', 'male', 'female'].map((gen) => (
               <TouchableOpacity
                 key={gen}
@@ -1267,47 +1290,33 @@ export function CreateAd() {
               </TouchableOpacity>
             ))}
           </View>
-          {!gender && <RequiredWarning />}
         </View>
 
-        {/* Daily Budget Section — LTR: Label left, amount right. RTL: amount right, label left (position mirror). */}
+        {/* Daily Budget / pricing controls are hidden during iOS Apple review mode */}
+        {!isPaymentsHidden && (
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
-            {rtl ? (
-              <>
-                <View style={styles.sectionHeaderValueWrap}>
-                  <Text style={[styles.valueText, ltrNumber]} numberOfLines={1}>{formatUSDEnglish(dailyBudget)}/{t('day')}</Text>
-                </View>
-                <View style={[styles.titleWithRequiredRow, styles.sectionHeaderTitleWrap]}>
-                  <Text style={[styles.sectionTitle, styles.sectionTitleRTL, rtlText()]} numberOfLines={1}>{t('createAdDailyBudget')}</Text>
-                  <Text style={styles.asterisk}>*</Text>
-                </View>
-              </>
-            ) : (
-              <>
-                <View style={[styles.titleWithRequiredRow, styles.sectionHeaderTitleWrap]}>
-                  <Text style={[styles.sectionTitle, styles.sectionTitleRTL, rtlText()]} numberOfLines={1}>{t('createAdDailyBudget')}</Text>
-                  <Text style={styles.asterisk}>*</Text>
-                </View>
-                <View style={styles.sectionHeaderValueWrap}>
-                  <Text style={[styles.valueText, ltrNumber]} numberOfLines={1}>{formatUSDEnglish(dailyBudget)}/{t('day')}</Text>
-                </View>
-              </>
-            )}
+            <Text style={[styles.sectionTitle, rtlText()]}>
+              {t('createAdDailyBudget') || 'Daily Budget'} <Text style={styles.asterisk}>*</Text>
+            </Text>
+            <Text style={[styles.valueText, ltrNumber, { fontFamily: numberFont }]}>${dailyBudget}/day</Text>
           </View>
-          <BudgetSlider
-            value={dailyBudget}
-            onChange={setDailyBudget}
-            budgetValues={availableBudgets}
-            tenDollarEnabled={pricingSettings.ten_dollar_ads_enabled !== false}
-            isRTL={rtl}
-            language={language}
-          />
-          <Text style={[styles.hintText, rtlText()]}>{t('createAdHowMuchPerDay')}</Text>
+          <View style={styles.sliderLTRWrap}>
+            <BudgetSlider
+              value={dailyBudget}
+              onChange={setDailyBudget}
+              budgetValues={availableBudgets}
+              tenDollarEnabled={pricingSettings.ten_dollar_ads_enabled !== false}
+              isRTL={false}
+              language={language as 'ckb' | 'ar'}
+            />
+          </View>
+          <Text style={[styles.hintText, rtlText()]}>{t('createAdHowMuchPerDay') || 'How much to spend per day'}</Text>
         </View>
+        )}
 
         {/* Discount Code Section - After Budget Slider - Only show when enabled */}
-        {config?.discount?.discount_enabled === true && (
+        {!isPaymentsHidden && config?.discount?.discount_enabled === true && (
           <View style={styles.section}>
             <View style={styles.sectionHeaderRow}>
               <View style={styles.sectionTitleRow}>
@@ -1354,60 +1363,45 @@ export function CreateAd() {
           </View>
         )}
 
-        {/* Duration Section — LTR: Label left, amount right. RTL: amount right, label left (position mirror). */}
+        {/* Duration Section - LTR slider only (min left, max right); official @react-native-community/slider */}
+        {!isPaymentsHidden && (
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
-            {rtl ? (
-              <>
-                <View style={styles.sectionHeaderValueWrap}>
-                  <Text style={[styles.valueText, ltrNumber]} numberOfLines={1}>{duration} {t('days')}</Text>
-                </View>
-                <View style={[styles.titleWithRequiredRow, styles.sectionHeaderTitleWrap]}>
-                  <Text style={[styles.sectionTitle, styles.sectionTitleRTL, rtlText()]} numberOfLines={1}>{t('createAdDuration')}</Text>
-                  <Text style={styles.asterisk}>*</Text>
-                </View>
-              </>
-            ) : (
-              <>
-                <View style={[styles.titleWithRequiredRow, styles.sectionHeaderTitleWrap]}>
-                  <Text style={[styles.sectionTitle, styles.sectionTitleRTL, rtlText()]} numberOfLines={1}>{t('createAdDuration')}</Text>
-                  <Text style={styles.asterisk}>*</Text>
-                </View>
-                <View style={styles.sectionHeaderValueWrap}>
-                  <Text style={[styles.valueText, ltrNumber]} numberOfLines={1}>{duration} {t('days')}</Text>
-                </View>
-              </>
-            )}
+            <Text style={[styles.sectionTitle, rtlText()]}>
+              {t('createAdDuration') || 'Duration'} <Text style={styles.asterisk}>*</Text>
+            </Text>
+            <Text style={[styles.valueText, ltrNumber, { fontFamily: numberFont }]}>{duration} {duration === 1 ? (t('day') || 'Day') : (t('days') || 'Days')}</Text>
           </View>
-          <View style={[styles.sliderWrap, rtl && styles.sliderWrapRTL]}>
-            <Slider
-              style={styles.slider}
+          <View style={styles.sliderLTRWrap}>
+            <AdaptiveSlider
               minimumValue={1}
               maximumValue={7}
               step={1}
               value={duration}
               onValueChange={(v) => setDuration(Math.round(v))}
-              minimumTrackTintColor={colors.primary.DEFAULT}
-              maximumTrackTintColor={colors.border.DEFAULT}
-              thumbTintColor={colors.primary.DEFAULT}
+              minimumTrackTintColor={colors.primary?.DEFAULT ?? '#7C3AED'}
+              maximumTrackTintColor={colors.border?.DEFAULT ?? '#E4E4E7'}
+              thumbTintColor={colors.primary?.DEFAULT ?? '#7C3AED'}
+              style={styles.slider}
             />
           </View>
-          <Text style={[styles.hintText, rtlText()]}>{t('createAdChooseDuration')}</Text>
+          <Text style={[styles.hintText, rtlText()]}>{t('createAdChooseDuration') || 'Choose how many days your ad will run'}</Text>
         </View>
+        )}
 
-        {/* Schedule Start Time Section */}
+        {/* Schedule Start Time Section - text black/dark on light BG */}
         <View style={styles.scheduleCard}>
-          <View style={[styles.scheduleHeader, rtl && styles.scheduleHeaderRTL]}>
-            <Calendar size={20} color={colors.foreground.DEFAULT} />
+          <View style={styles.scheduleHeader}>
+            <Calendar size={20} color={fgColor} />
             <Text style={[styles.scheduleTitle, rtlText()]}>{t('createAdScheduleStart')}</Text>
           </View>
           <Text style={[styles.hintText, rtlText()]}>{t('createAdChooseWhenStarts')}</Text>
-          <View style={[styles.scheduleButtonRow, rtl && styles.scheduleButtonRowRTL]}>
+          <View style={styles.scheduleButtonRow}>
             <TouchableOpacity
               style={[styles.scheduleButton, startNow && styles.scheduleButtonSelected]}
               onPress={() => setStartNow(true)}
             >
-              <Zap size={20} color={startNow ? '#fff' : colors.foreground.muted} />
+              <Zap size={20} color={startNow ? '#fff' : fgMutedColor} />
               <Text style={[styles.scheduleButtonText, startNow && styles.scheduleButtonTextSelected, rtlText()]}>
                 {t('createAdStartNow')}
               </Text>
@@ -1423,7 +1417,7 @@ export function CreateAd() {
                 }
               }}
             >
-              <Calendar size={20} color={!startNow ? '#fff' : colors.foreground.muted} />
+              <Calendar size={20} color={!startNow ? '#fff' : fgMutedColor} />
               <Text style={[styles.scheduleButtonText, !startNow && styles.scheduleButtonTextSelected, rtlText()]}>
                 {t('createAdSchedule')}
               </Text>
@@ -1432,78 +1426,38 @@ export function CreateAd() {
 
           {/* Date/Time Picker (shown when schedule is selected) */}
           {!startNow && (
-            <View style={styles.dateTimeContainer}>
-              <View style={styles.dateTimeRow}>
-                <TouchableOpacity
-                  style={styles.dateTimeButton}
-                  onPress={() => {
-                    setShowDatePicker(true);
-                    setShowTimePicker(false);
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Calendar size={18} color={colors.primary.DEFAULT} />
-                  <Text style={[styles.dateTimeButtonText, ltrNumber]}>
-                    {scheduledDate.toLocaleDateString('en-GB', {
-                      day: '2-digit',
-                      month: '2-digit',
-                      year: 'numeric'
-                    })}
-                  </Text>
-                  <ChevronDown size={16} color={colors.foreground.muted} style={rtlIcon()} />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.dateTimeButton}
-                  onPress={() => {
-                    setShowTimePicker(true);
-                    setShowDatePicker(false);
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Clock size={18} color={colors.primary.DEFAULT} />
-                  <Text style={[styles.dateTimeButtonText, ltrNumber]}>
-                    {scheduledDate.toLocaleTimeString('en-GB', {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                      hour12: false
-                    })}
-                  </Text>
-                  <ChevronDown size={16} color={colors.foreground.muted} style={rtlIcon()} />
-                </TouchableOpacity>
-              </View>
-              <Text style={[styles.dateTimeHint, rtlText()]}>
-                ⏰ {t('createAdDateTimeHint')}
-              </Text>
-              
-              {/* Date Picker - Shows as modal on Android, inline on iOS */}
-              {showDatePicker && (
-                <DateTimePicker
-                  value={scheduledDate}
-                  mode="date"
-                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                  onChange={handleDateChange}
-                  minimumDate={new Date()}
-                  maximumDate={getMaxDate()}
-                />
-              )}
-              
-              {/* Time Picker - Shows as modal on Android, inline on iOS */}
-              {showTimePicker && (
-                <DateTimePicker
-                  value={scheduledDate}
-                  mode="time"
-                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                  onChange={handleTimeChange}
-                  is24Hour={true}
-                  minimumDate={Platform.OS === 'android' ? getMinDateTime() : undefined}
-                />
-              )}
+            <View
+              style={{
+                backgroundColor: isDark ? '#18181B' : '#FFFFFF',
+                borderRadius: 16,
+                borderWidth: 1,
+                borderColor: isDark ? '#27272A' : '#E4E4E7',
+                padding: 12,
+                maxHeight: 300,
+                overflow: 'hidden',
+                marginTop: 12,
+              }}
+            >
+              <DateTimePicker
+                value={scheduledDate || new Date()}
+                mode="datetime"
+                display="spinner"
+                themeVariant={isDark ? 'dark' : 'light'}
+                minimumDate={new Date(Date.now() + 5 * 60 * 1000)}
+                onChange={(event, selectedDate) => {
+                  if (event.type === 'set' && selectedDate) {
+                    setScheduledDate(selectedDate);
+                  }
+                }}
+                textColor={isDark ? '#FAFAFA' : '#1A1A1F'}
+                style={{ height: 200 }}
+              />
             </View>
           )}
 
           {startNow && (
             <View style={styles.startNowHint}>
-              <Zap size={14} color={colors.foreground.muted} />
+              <Zap size={14} color={fgMutedColor} />
               <Text style={[styles.startNowHintText, rtlText()]}>
                 {t('createAdStartNowHint')}
               </Text>
@@ -1526,7 +1480,7 @@ export function CreateAd() {
                     {objective === 'views' ? t('createAdEstViews') : t('createAdEstReach')}
                   </Text>
                 </View>
-                <Text style={[styles.summaryItemValue, ltrNumber]}>
+                <Text style={[styles.summaryItemValue, ltrNumber, { fontFamily: numberFont }]}>
                   {formatReach(estimatedReach.min)} - {formatReach(estimatedReach.max)}
                 </Text>
               </View>
@@ -1535,7 +1489,7 @@ export function CreateAd() {
                   <Zap size={14} color={colors.primary.DEFAULT} />
                   <Text style={[styles.summaryItemLabel, rtlText()]}>{t('createAdEstImpressions')}</Text>
                 </View>
-                <Text style={[styles.summaryItemValue, ltrNumber]}>
+                <Text style={[styles.summaryItemValue, ltrNumber, { fontFamily: numberFont }]}>
                   {formatReach(Math.round(estimatedReach.min * 1.5))} - {formatReach(Math.round(estimatedReach.max * 1.5))}
                 </Text>
               </View>
@@ -1566,12 +1520,18 @@ export function CreateAd() {
           </View>
         )}
 
-        {/* Destination Link Section */}
+        {/* Destination Link — label right, required left */}
         {shouldShowDestination && (
           <View style={styles.section}>
-            <View style={[styles.titleWithRequiredRow, rtl && styles.titleWithRequiredRowRTL]}>
-              <Text style={[styles.sectionTitle, styles.sectionTitleRTL, rtlText()]}>{t('createAdSelectYourLink')}</Text>
-              {isDestinationRequired && <Text style={styles.asterisk}>*</Text>}
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionHeaderTitleWrap}>
+                <Text style={[styles.sectionTitle, styles.sectionTitleRTL, rtlText()]}>{t('createAdSelectYourLink')}</Text>
+              </View>
+              {isDestinationRequired && (
+                <View style={styles.requiredLeftBlock}>
+                  <Text style={styles.asterisk}>*</Text>
+                </View>
+              )}
             </View>
             
             {destinationLoading ? (
@@ -1612,7 +1572,6 @@ export function CreateAd() {
                   <ChevronDown 
                     color={colors.foreground.muted} 
                     size={20} 
-                    style={rtlIcon()}
                   />
                 </TouchableOpacity>
 
@@ -1686,63 +1645,98 @@ export function CreateAd() {
           </View>
         )}
 
-        {/* Campaign Name Section */}
-        <View style={[styles.section, rtl && styles.sectionRTLAlign]}>
-          <View style={[styles.titleWithAsteriskRow, rtl && styles.titleWithAsteriskRowRTL]}>
-            <Text style={[styles.sectionTitleCompact, rtlText(), rtl && styles.forceRightLabel]}>{t('createAdCampaignName')}</Text>
-            <Text style={styles.asterisk}>*</Text>
+        {/* Campaign Name — label right, required left */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <View style={styles.sectionHeaderTitleWrap}>
+              <Text style={[styles.sectionTitleCompact, rtlText()]}>{t('createAdCampaignName')}</Text>
+            </View>
+            <View style={styles.requiredLeftBlock}>
+              <Text style={styles.asterisk}>*</Text>
+              {!campaignName.trim() && <RequiredWarning />}
+            </View>
           </View>
           <TextInput
-            style={[styles.input, rtlInput(), rtl && styles.forceRightInput]}
+            style={[styles.input, rtlInput()]}
             value={campaignName}
             onChangeText={setCampaignName}
-            placeholder={t('createAdCampaignNamePlaceholder')}
+            placeholder={prefill ? t('pleaseUseAnotherCampaignName') : t('createAdCampaignNamePlaceholder')}
             placeholderTextColor={colors.input.placeholder}
           />
-          <Text style={[styles.hintText, rtlText(), rtl && styles.forceRightHint]}>{t('createAdCampaignNameHint')}</Text>
-          {!campaignName.trim() && <RequiredWarning />}
+          <Text style={[styles.hintText, rtlText()]}>
+            {prefill ? t('pleaseUseAnotherCampaignName') : t('createAdCampaignNameHint')}
+          </Text>
         </View>
 
-        {/* TikTok Authorization Code Section */}
-        <View style={[styles.section, rtl && styles.sectionRTLAlign]}>
-          <View style={[styles.titleWithAsteriskRow, rtl && styles.titleWithAsteriskRowRTL]}>
-            <Text style={[styles.sectionTitleCompact, rtlText(), rtl && styles.forceRightLabel]}>{t('createAdTikTokCode')}</Text>
-            <Text style={styles.asterisk}>*</Text>
+        {/* TikTok Code — label right, required left */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <View style={styles.sectionHeaderTitleWrap}>
+              <Text style={[styles.sectionTitleCompact, rtlText()]}>{t('createAdTikTokCode')}</Text>
+            </View>
+            <View style={styles.requiredLeftBlock}>
+              <Text style={styles.asterisk}>*</Text>
+              {!isValidTikTokCode(tiktokCode) && <RequiredWarning />}
+            </View>
           </View>
           <TextInput
-            style={[styles.input, styles.codeInput, rtlInput(), rtl && styles.forceRightInput]}
+            style={[styles.input, styles.codeInput]}
             value={tiktokCode}
-            onChangeText={setTiktokCode}
-            placeholder={t('createAdTikTokCodePlaceholder')}
+            onChangeText={(text) => {
+              const cleaned = text.replace(/[\n\r]/g, '').slice(0, 70).trim();
+              setTiktokCode(cleaned);
+            }}
+            placeholder={language === 'ckb' ? 'کۆدی ڕێگەپێدانی سپارک ئەد' : language === 'ar' ? 'رمز تفويض Spark Ad' : (t('createAdTikTokCodePlaceholder') || 'Spark Ad authorization code')}
             placeholderTextColor={colors.input.placeholder}
-            multiline
+            maxLength={70}
+            multiline={false}
+            numberOfLines={1}
+            blurOnSubmit
+            returnKeyType="done"
+            autoCapitalize="none"
+            autoCorrect={false}
           />
-          <View style={[styles.infoBox, rtl && styles.infoBoxForceRTL]}>
+          <Text style={[styles.hintText, rtlText()]}>
+            {tiktokCode.length}/70
+          </Text>
+          {tiktokCode.length > 0 && tiktokCode.length < 32 && (
+            <Text style={[styles.hintText, { color: colors.error }, rtlText()]}>
+              {language === 'ckb'
+                ? 'کۆدەکە دەبێت لانیکەم ٣٢ پیت بێت'
+                : 'يجب أن يكون الرمز 32 حرفًا على الأقل'}
+            </Text>
+          )}
+          <View style={styles.infoBox}>
             <AlertTriangle size={16} color={colors.warning} />
             <View style={styles.infoContent}>
-              <Text style={[styles.infoText, rtlText(), rtl && styles.forceRightHint]}>
+              <Text style={[styles.infoText, rtlText()]}>
                 {t('createAdSponsorCodeNote')}
               </Text>
-              <Text style={[styles.infoText, rtlText(), rtl && styles.forceRightHint]}>
+              <Text style={[styles.infoText, rtlText()]}>
                 {t('createAdGetSponsorCodeTutorial')}
               </Text>
             </View>
           </View>
           <TouchableOpacity 
-            style={[styles.tutorialButton, rtl && styles.tutorialButtonRTL]}
+            style={styles.tutorialButton}
             onPress={() => navigation.navigate('Main', { screen: 'Tutorial' })}
           >
             <Info size={16} color={colors.primary.DEFAULT} />
             <Text style={[styles.tutorialButtonText, rtlText()]}>{t('createAdTutorialClickHere')}</Text>
           </TouchableOpacity>
-          {!isValidTikTokCode(tiktokCode) && <RequiredWarning />}
         </View>
         </View>
       </ScrollView>
 
 
-      {/* STICKY CHECKOUT SECTION */}
-      <View style={[styles.checkoutContainer, { paddingBottom: insets.bottom + spacing.md }]}>
+      {!isPaymentsHidden ? (
+      /* STICKY CHECKOUT SECTION */
+      <View
+        style={[
+          styles.checkoutContainer,
+          { paddingBottom: insets.bottom + spacing.md },
+        ]}
+      >
         {/* Expand/Collapse Toggle */}
         <TouchableOpacity
           onPress={() => setIsCheckoutExpanded(!isCheckoutExpanded)}
@@ -1750,9 +1744,9 @@ export function CreateAd() {
           activeOpacity={0.7}
         >
           {isCheckoutExpanded ? (
-            <ChevronDown size={24} color={colors.foreground.muted} style={rtlIcon()} />
+            <ChevronDown size={24} color={colors.foreground.muted} />
           ) : (
-            <ChevronUp size={24} color={colors.foreground.muted} style={rtlIcon()} />
+            <ChevronUp size={24} color={colors.foreground.muted} />
           )}
         </TouchableOpacity>
 
@@ -1761,18 +1755,18 @@ export function CreateAd() {
           <View style={styles.breakdownContainer}>
             <View style={styles.breakdownRow}>
               <Text style={[styles.breakdownLabel, rtlText()]}>{t('subtotal')}</Text>
-              <Text style={[styles.breakdownValue, ltrNumber]}>{formatUSDEnglish(pricing.baseTotal)}</Text>
+              <Text style={[styles.breakdownValue, ltrNumber, { fontFamily: numberFont }]}>{formatUSDEnglish(pricing.baseTotal)}</Text>
             </View>
             <View style={styles.breakdownRow}>
               <Text style={[styles.breakdownLabel, rtlText()]}>{t('tax')}</Text>
-              <Text style={[styles.breakdownValue, ltrNumber]}>{formatUSDEnglish(pricing.taxAmount)}</Text>
+              <Text style={[styles.breakdownValue, ltrNumber, { fontFamily: numberFont }]}>{formatUSDEnglish(pricing.taxAmount)}</Text>
             </View>
             {appliedDiscount && pricing.discountAmount > 0 && (
               <View style={styles.breakdownRow}>
                 <Text style={[styles.breakdownLabel, { color: '#10B981' }, rtlText()]}>
                   {t('discount')} ({appliedDiscount.code})
                 </Text>
-                <Text style={[styles.breakdownValue, { color: '#10B981' }, ltrNumber]}>
+                <Text style={[styles.breakdownValue, { color: '#10B981', fontFamily: numberFont }, ltrNumber]}>
                   -{formatUSDEnglish(pricing.discountAmount)}
                 </Text>
               </View>
@@ -1780,14 +1774,14 @@ export function CreateAd() {
             <View style={styles.divider} />
             <View style={styles.breakdownTotalRow}>
               <Text style={[styles.breakdownTotalLabel, rtlText()]}>{t('createAdTotalUSD')}</Text>
-              <Text style={[styles.breakdownTotalValue, { fontWeight: '700' }, ltrNumber]}>
+              <Text style={[styles.breakdownTotalValue, { fontWeight: '700', fontFamily: numberFont }, ltrNumber]}>
                 {formatUSDEnglish(pricing.totalUSD)}
               </Text>
             </View>
             <View style={styles.breakdownTotalRow}>
               <Text style={[styles.breakdownTotalLabel, rtlText()]}>{t('createAdTotalIQD')}</Text>
-              <Text style={[styles.breakdownTotalValue, { color: '#7C3AED', fontWeight: '700' }, ltrNumber]}>
-                {formatIQD(pricing.totalIQD, rtl)}
+              <Text style={[styles.breakdownTotalValue, { color: '#7C3AED', fontWeight: '700', fontFamily: numberFont }, ltrNumber]}>
+                {formatIQDEnglish(pricing.totalIQD)}
               </Text>
             </View>
           </View>
@@ -1797,7 +1791,7 @@ export function CreateAd() {
         {isPromoActive && promo && (
           <View style={styles.promoRow}>
             <Text style={[styles.promoLabel, rtlText()]}>✨ {t('promoPricePerDay') || 'Promo price per day'}</Text>
-            <Text style={[styles.promoValue, ltrNumber]}>{formatIQD(promo.display_price_iqd, rtl)}</Text>
+            <Text style={[styles.promoValue, ltrNumber, { fontFamily: numberFont }]}>{formatIQDEnglish(promo.display_price_iqd)}</Text>
           </View>
         )}
 
@@ -1809,11 +1803,11 @@ export function CreateAd() {
                 {t('total') || 'Total'} ({duration} {duration === 1 ? t('day') || 'day' : t('days')})
               </Text>
               {!isPromoActive && (
-                <Text style={[styles.totalUsd, rtlText()]}>{t('totalUsdDisplay', { amount: formatUSDEnglish(pricing.totalUSD) })}</Text>
+                <Text style={[styles.totalUsd, rtlText(), { fontFamily: numberFont }]}>{t('totalUsdDisplay', { amount: formatUSDEnglish(pricing.totalUSD) })}</Text>
               )}
             </View>
-            <Text style={[styles.totalIqd, ltrNumber]}>
-              {formatIQD(pricing.totalIQD, rtl)} ({t('currencyDinar')})
+            <Text style={[styles.totalIqd, ltrNumber, { fontFamily: numberFont }]}>
+              {formatIQDEnglish(pricing.totalIQD)} ({t('currencyDinar')})
             </Text>
           </View>
 
@@ -1845,16 +1839,33 @@ export function CreateAd() {
                   <Text style={[styles.buttonText, rtlText()]}>{t('createAdSubmitting')}</Text>
                 </View>
               ) : (
-                <Text style={[styles.buttonText, rtlText()]}>
-                  {t('payAndLaunch')} {formatIQD(pricing.totalIQD, rtl)} ({t('currencyDinar')})
+                <Text style={[styles.buttonText, rtlText(), { fontFamily: numberFont }]}>
+                  {t('payAndLaunch')}
                 </Text>
               )}
             </LinearGradient>
           </TouchableOpacity>
         </View>
       </View>
+      ) : (
+      <View
+        style={[
+          styles.checkoutContainer,
+          { paddingBottom: insets.bottom + spacing.md },
+        ]}
+      >
+        <View style={styles.reviewModeCard}>
+          <Text style={styles.reviewModeText}>
+            {language === 'ckb'
+              ? 'بۆ تەواوکردنی داواکاریەکەت، سەردانی وێبسایتەکەمان بکە'
+              : language === 'ar'
+              ? 'لإكمال طلبك، قم بزيارة موقعنا الإلكتروني'
+              : 'To complete your order, visit our website'}
+          </Text>
+        </View>
+      </View>
+      )}
     </View>
-    </KeyboardAvoidingView>
   );
 }
 
@@ -1864,6 +1875,9 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
   const fontMedium = getFontFamilyWithWeight(lang, 'medium');
   const fontBold = getFontFamilyWithWeight(lang, 'bold');
   const fontSemibold = getFontFamilyWithWeight(lang, 'semiBold');
+  // Light theme: ensure text on white/light BG is always dark (avoid white-on-white)
+  const fg = colors.foreground?.DEFAULT ?? '#111827';
+  const fgMuted = colors.foreground?.muted ?? '#6B7280';
   return StyleSheet.create({
   container: {
     flex: 1,
@@ -1900,9 +1914,6 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     color: '#000',
     fontWeight: '500',
   },
-  rowReverse: {
-    flexDirection: 'row',
-  },
   headerSpacer: {
     width: 40,
     minWidth: 40,
@@ -1931,7 +1942,7 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
   headerTitle: {
     ...typography.h3,
     ...semiBoldStyle,
-    color: colors.foreground.DEFAULT,
+    color: fg,
     textAlign: 'center',
   },
   content: {
@@ -1943,27 +1954,21 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     width: '100%',
     paddingTop: 8,
   },
-  scrollContentWrapRTL: {},
   section: {
     paddingVertical: spacing.lg,
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: 16,
     marginBottom: 24,
     width: '100%',
     alignSelf: 'stretch',
     alignItems: 'stretch',
   },
-  sectionRTLAlign: {
-    alignItems: 'flex-end',
-  },
   sectionHeader: {
     flexDirection: rowDir,
     alignItems: 'center',
-    justifyContent: 'flex-start',
+    justifyContent: 'space-between',
     gap: spacing.sm,
     marginBottom: spacing.md,
-  },
-  sectionHeaderRowReverse: {
-    flexDirection: 'row',
+    width: '100%',
   },
   sectionHeaderRow: {
     flexDirection: rowDir,
@@ -1976,8 +1981,8 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
   /** Wraps the amount/value (e.g. $20/day) to add clear gap from RTL label so text doesn't blend. */
   sectionHeaderValueWrap: {
     flexShrink: 0,
-    marginStart: rtl ? spacing.md : 0,
-    marginEnd: rtl ? 0 : spacing.md,
+    marginStart: spacing.md,
+    marginEnd: 0,
   },
   /** Wraps title+asterisk; allow shrink so long CKB/AR text wraps inside safe area. */
   sectionHeaderTitleWrap: {
@@ -1989,18 +1994,30 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     ...typography.h3,
     ...semiBoldStyle,
     fontSize: 16,
-    color: colors.foreground.DEFAULT,
+    color: fg,
   },
-  sectionTitleRTL: {},
-  /** Position only. Title + asterisk stay close (no width:100% on title); row aligns start/end per RTL. */
+  sectionTitleRTL: {
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    flex: 1,
+  },
+  /** Title only (label) — in RTL sits on right. */
   titleWithRequiredRow: {
+    flex: 1,
+    minWidth: 0,
     flexDirection: rowDir,
     alignItems: 'center',
     gap: 6,
-    width: '100%',
-    justifyContent: 'flex-start',
+    justifyContent: 'flex-end',
   },
-  titleWithRequiredRowRTL: {},
+  /** Wrapper for asterisk + RequiredWarning — in RTL sits on left. */
+  requiredLeftBlock: {
+    flexDirection: 'row',
+    alignItems: 'left',
+    gap: 6,
+    flexShrink: 0,
+    justifyContent: 'flex-end',
+  },
   asterisk: {
     color: '#EF4444',
   },
@@ -2011,32 +2028,37 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     color: colors.primary.DEFAULT,
     includeFontPadding: false,
   },
-  /** Label — RTL; full width so text sits on right when used alone (e.g. "Select target audience region"). */
+  /** Label — full width, right-aligned for RTL (e.g. "Select target audience region"). */
   subsectionLabel: {
     ...typography.label,
     fontFamily,
-    color: colors.foreground.DEFAULT,
+    color: fg,
     marginBottom: 8,
     width: '100%',
     maxWidth: '100%',
+    textAlign: 'right',
+    writingDirection: 'rtl',
   },
-  /** Label in row with asterisk (Age, Gender) — no width so asterisk stays close. */
+  /** Label in row with asterisk (Age, Gender) — right-aligned for RTL. */
   subsectionLabelInRow: {
     ...typography.label,
     fontFamily,
-    color: colors.foreground.DEFAULT,
+    color: fg,
     marginBottom: 8,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    flex: 1,
   },
-  /** Section title when alone on line (Campaign Name, TikTok Code) — full width so title sits on right in CKB/AR. */
+  /** Section title when alone on line (Campaign Name, TikTok Code) — full width, right-aligned for RTL. */
   sectionTitleStandalone: {
     ...typography.h3,
     ...semiBoldStyle,
     fontSize: 16,
-    color: colors.foreground.DEFAULT,
+    color: fg,
     width: '100%',
     maxWidth: '100%',
     alignSelf: 'stretch',
-    textAlign: 'left',
+    textAlign: 'right',
     writingDirection: 'rtl',
     marginBottom: spacing.sm,
   },
@@ -2044,37 +2066,24 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     ...typography.h3,
     ...semiBoldStyle,
     fontSize: 16,
-    color: colors.foreground.DEFAULT,
+    color: fg,
     marginBottom: spacing.sm,
   },
   titleWithAsteriskRow: {
     width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-start',
-    gap: 4,
-  },
-  titleWithAsteriskRowRTL: {
-    flexDirection: 'row',
     justifyContent: 'flex-end',
-  },
-  forceRightLabel: {
-    maxWidth: '92%',
-    flexShrink: 1,
-    textAlign: 'right',
-    writingDirection: 'rtl',
+    gap: 4,
   },
   hintText: {
     ...typography.caption,
     fontFamily,
-    color: colors.foreground.muted,
+    color: fgMuted,
     marginTop: 6,
     marginBottom: 4,
     width: '100%',
     maxWidth: '100%',
-  },
-  forceRightHint: {
-    width: '100%',
     textAlign: 'right',
     writingDirection: 'rtl',
   },
@@ -2099,9 +2108,6 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     borderWidth: 2,
     backgroundColor: colors.background.secondary,
   },
-  objectiveCardRowReverse: {
-    flexDirection: 'row',
-  },
   objectiveIconContainer: {
     width: 40,
     height: 40,
@@ -2120,9 +2126,10 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     fontFamily,
     fontSize: 16,
     fontWeight: '600',
-    color: colors.foreground.DEFAULT,
+    color: fg,
     marginBottom: spacing.xs,
     includeFontPadding: false,
+    justifyContent: 'center',
   },
   objectiveTitleSelected: {
     color: colors.primary.DEFAULT,
@@ -2130,7 +2137,7 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
   objectiveDescription: {
     ...typography.bodySmall,
     fontFamily,
-    color: colors.foreground.muted,
+    color: fgMuted,
   },
   objectiveCheckContainer: {
     width: 26,
@@ -2147,7 +2154,7 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
   },
   tutorialLink: {
     marginTop: spacing.xs,
-    alignSelf: 'flex-start',
+    alignSelf: 'flex-end',
   },
   tutorialLinkText: {
     fontSize: 14,
@@ -2159,9 +2166,6 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     justifyContent: 'flex-start',
     gap: spacing.sm,
     marginBottom: spacing.sm,
-  },
-  buttonRowReverse: {
-    flexDirection: 'row',
   },
   regionButton: {
     flex: 1,
@@ -2181,7 +2185,7 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
   regionButtonText: {
     ...typography.label,
     fontFamily,
-    color: colors.foreground.DEFAULT,
+    color: fg,
   },
   regionButtonTextSelected: {
     ...semiBoldStyle,
@@ -2190,13 +2194,9 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
   ageGrid: {
     flexDirection: rowDir,
     flexWrap: 'wrap',
-    justifyContent: 'flex-start',
+    justifyContent: 'flex-end',
     gap: spacing.sm,
     marginBottom: spacing.sm,
-  },
-  ageGridRTL: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
   },
   ageButton: {
     paddingVertical: spacing.sm,
@@ -2213,22 +2213,52 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
   ageText: {
     ...typography.label,
     fontFamily,
-    color: colors.foreground.DEFAULT,
+    color: fg,
   },
   ageTextSelected: {
     ...semiBoldStyle,
     color: '#fff',
   },
-  sliderWrap: {
-    width: '100%',
+  budgetQuickRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
   },
-  sliderWrapRTL: {
-    transform: [{ scaleX: rtl ? -1 : 1 }],
+  budgetQuickLeft: {
+    flexDirection: 'row',
+    gap: 16,
+  },
+  budgetQuickLeftRTL: {
+    flexDirection: 'row',
+  },
+  budgetQuickBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  budgetQuickText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#A1A1AA',
+    fontFamily,
+  },
+  budgetQuickTextActive: {
+    color: '#7C3AED',
+  },
+  sliderLTRWrap: {
+    width: '100%',
+    direction: 'ltr',
+    alignSelf: 'stretch',
+    paddingVertical: 4,
+  },
+  sliderContainer: {
+    minHeight: 36,
+    justifyContent: 'center',
   },
   slider: {
     width: '100%',
-    height: 40,
-    marginBottom: spacing.xs,
+    height: 28,
+    minHeight: 28,
   },
   sliderLabels: {
     flexDirection: rowDir,
@@ -2239,7 +2269,7 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
   sliderLabel: {
     fontSize: 12,
     fontFamily,
-    color: colors.foreground.muted,
+    color: fgMuted,
   },
   scheduleCard: {
     backgroundColor: colors.background.secondary,
@@ -2255,22 +2285,16 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     gap: spacing.sm,
     marginBottom: spacing.xs,
   },
-  scheduleHeaderRTL: {
-    flexDirection: 'row',
-  },
   scheduleTitle: {
     ...typography.h3,
     ...semiBoldStyle,
     fontSize: 16,
-    color: colors.foreground.DEFAULT,
+    color: fg,
   },
   scheduleButtonRow: {
     flexDirection: rowDir,
     gap: spacing.sm,
     marginTop: spacing.md,
-  },
-  scheduleButtonRowRTL: {
-    flexDirection: 'row',
   },
   scheduleButton: {
     flex: 1,
@@ -2291,7 +2315,7 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
   scheduleButtonText: {
     ...typography.label,
     fontFamily,
-    color: colors.foreground.muted,
+    color: fgMuted,
   },
   scheduleButtonTextSelected: {
     ...semiBoldStyle,
@@ -2306,7 +2330,7 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
   startNowHintText: {
     ...typography.caption,
     fontFamily,
-    color: colors.foreground.muted,
+    color: fgMuted,
   },
   dateTimeContainer: {
     marginTop: spacing.md,
@@ -2339,15 +2363,26 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     ...typography.label,
     ...semiBoldStyle,
     fontFamily,
-    color: colors.foreground.DEFAULT,
+    color: fg,
   },
   dateTimeHint: {
     ...typography.caption,
     fontFamily,
     fontSize: 11,
-    color: colors.foreground.muted,
+    color: fgMuted,
     textAlign: 'center',
     marginTop: spacing.xs,
+  },
+  dateTimePickerContainer: {
+    backgroundColor: colors.card?.background ?? '#FFFFFF',
+    borderRadius: 16,
+    padding: 16,
+    overflow: 'hidden',
+    maxHeight: 300,
+    marginTop: spacing.sm,
+  },
+  dateTimePickerWheel: {
+    height: 200,
   },
   summaryCard: {
     backgroundColor: colors.card.background,
@@ -2368,7 +2403,7 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     ...typography.h3,
     ...semiBoldStyle,
     fontSize: 14,
-    color: colors.foreground.DEFAULT,
+    color: fg,
   },
   summaryGrid: {
     flexDirection: rowDir,
@@ -2393,13 +2428,13 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     ...typography.caption,
     fontFamily,
     fontSize: 11,
-    color: colors.foreground.muted,
+    color: fgMuted,
   },
   summaryItemValue: {
     fontFamily,
     fontSize: 16,
     fontWeight: '700',
-    color: colors.foreground.DEFAULT,
+    color: fg,
     includeFontPadding: false,
   },
   summaryItemSmall: {
@@ -2413,14 +2448,14 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     ...typography.caption,
     fontFamily,
     fontSize: 11,
-    color: colors.foreground.muted,
+    color: fgMuted,
   },
   summaryItemValueSmall: {
     ...typography.h3,
     ...semiBoldStyle,
     fontFamily,
     fontSize: 14,
-    color: colors.foreground.DEFAULT,
+    color: fg,
     marginTop: spacing.xs,
   },
   summaryDisclaimer: {
@@ -2447,14 +2482,10 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     paddingVertical: 12,
     fontSize: 15,
     fontFamily,
-    color: colors.foreground.DEFAULT,
+    color: fg,
     marginTop: 0,
     includeFontPadding: false,
     textAlign: 'left',
-    writingDirection: 'rtl',
-  },
-  forceRightInput: {
-    textAlign: 'right',
     writingDirection: 'rtl',
   },
   inputRTL: {
@@ -2462,8 +2493,9 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     writingDirection: 'rtl',
   },
   codeInput: {
-    minHeight: 80,
-    textAlignVertical: 'top',
+    fontFamily: 'Poppins',
+    textAlign: 'left',
+    writingDirection: 'ltr',
   },
   infoBox: {
     flexDirection: rowDir,
@@ -2473,18 +2505,12 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     marginTop: spacing.md,
     gap: spacing.sm,
   },
-  infoBoxRTL: {
-    flexDirection: 'row',
-  },
-  infoBoxForceRTL: {
-    flexDirection: 'row-reverse',
-  },
   infoContent: {
     flex: 1,
   },
   infoText: {
     fontSize: 14,
-    color: colors.foreground.DEFAULT,
+    color: fg,
     lineHeight: 20,
     width: '100%',
     maxWidth: '100%',
@@ -2497,9 +2523,6 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     marginTop: spacing.md,
     paddingVertical: spacing.sm,
   },
-  tutorialButtonRTL: {
-    flexDirection: 'row',
-  },
   tutorialButtonText: {
     fontSize: 14,
     fontWeight: '600',
@@ -2508,14 +2531,8 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
   requiredWarning: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
-    marginTop: spacing.xs,
-    flexShrink: 1,
-    minWidth: 0,
-    width: '100%',
-  },
-  requiredWarningRTL: {
-    flexDirection: 'row-reverse',
+    gap: 8,
+    flexShrink: 0,
   },
   requiredText: {
     ...typography.caption,
@@ -2541,6 +2558,23 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     shadowRadius: 8,
     elevation: 10,
   },
+  reviewModeCard: {
+    borderWidth: 1,
+    borderColor: colors.border.DEFAULT,
+    backgroundColor: colors.card.background,
+    borderRadius: borderRadius.card,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.sm,
+  },
+  reviewModeText: {
+    color: fg,
+    textAlign: 'center',
+    fontFamily,
+    fontSize: 14,
+    lineHeight: 22,
+    writingDirection: 'rtl',
+  },
   toggleButton: {
     alignItems: 'center',
     paddingVertical: spacing.sm,
@@ -2563,7 +2597,7 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
   breakdownValue: {
     ...typography.label,
     fontFamily,
-    color: colors.foreground.DEFAULT,
+    color: fg,
     fontSize: 14,
   },
   breakdownTotalRow: {
@@ -2577,7 +2611,7 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     fontFamily,
     fontSize: 16,
     fontWeight: '700',
-    color: colors.foreground.DEFAULT,
+    color: fg,
   },
   breakdownTotalValue: {
     ...typography.h3,
@@ -2607,12 +2641,12 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     ...typography.h3,
     ...semiBoldStyle,
     fontSize: 16,
-    color: colors.foreground.DEFAULT,
+    color: fg,
   },
   totalUsd: {
     ...typography.caption,
     fontFamily,
-    color: colors.foreground.muted,
+    color: fgMuted,
     marginTop: spacing.xs / 2,
   },
   promoRow: {
@@ -2697,10 +2731,10 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     flex: 1,
     ...typography.label,
     fontFamily,
-    color: colors.foreground.DEFAULT,
+    color: fg,
   },
   dropdownTextPlaceholder: {
-    color: colors.foreground.muted,
+    color: fgMuted,
   },
   dropdownOverlay: {
     flex: 1,
@@ -2731,7 +2765,7 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     ...typography.h3,
     ...semiBoldStyle,
     fontSize: 16,
-    color: colors.foreground.DEFAULT,
+    color: fg,
   },
   dropdownCloseButton: {
     padding: spacing.xs,
@@ -2756,7 +2790,7 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
   dropdownItemTitle: {
     ...typography.label,
     fontFamily,
-    color: colors.foreground.DEFAULT,
+    color: fg,
   },
   dropdownItemTitleSelected: {
     ...semiBoldStyle,
@@ -2765,7 +2799,7 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
   dropdownItemUrl: {
     ...typography.caption,
     fontFamily,
-    color: colors.foreground.muted,
+    color: fgMuted,
     marginTop: spacing.xs / 2,
   },
   noLinksContainer: {
@@ -2780,7 +2814,7 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
   noLinksText: {
     ...typography.bodySmall,
     fontFamily,
-    color: colors.foreground.muted,
+    color: fgMuted,
     textAlign: 'center',
     marginBottom: spacing.md,
   },
@@ -2823,7 +2857,7 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     ...typography.h2,
     fontSize: 24,
     fontWeight: '700',
-    color: colors.foreground.DEFAULT,
+    color: fg,
     marginBottom: spacing.md,
     textAlign: 'center',
     fontFamily,
@@ -2831,7 +2865,7 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
   disabledMessage: {
     ...typography.body,
     fontSize: 16,
-    color: colors.foreground.muted,
+    color: fgMuted,
     textAlign: 'center',
     lineHeight: 24,
     fontFamily,
@@ -2847,7 +2881,7 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     backgroundColor: colors.card.background,
     borderRadius: borderRadius.button,
     padding: spacing.md,
-    color: colors.foreground.DEFAULT,
+    color: fg,
     fontFamily,
     borderWidth: 1,
     borderColor: colors.border.DEFAULT,

@@ -3,9 +3,9 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { supabaseRead } from '@/integrations/supabase/client';
 import { spacing } from '@/theme/spacing';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Bell } from 'lucide-react-native';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, StyleSheet, TouchableOpacity } from 'react-native';
 
 export const NotificationBell: React.FC = () => {
@@ -15,6 +15,25 @@ export const NotificationBell: React.FC = () => {
   const styles = createStyles(colors);
   const [unreadCount, setUnreadCount] = useState(0);
   const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  const fetchUnreadCount = useCallback(async () => {
+    if (!user) return;
+    const { count } = await supabaseRead
+      .from('notifications')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .eq('is_read', false);
+    if (count !== null) {
+      setUnreadCount(count);
+    }
+  }, [user]);
+
+  // Refetch when screen gains focus (e.g. returning from Notifications after mark-as-read)
+  useFocusEffect(
+    useCallback(() => {
+      fetchUnreadCount();
+    }, [fetchUnreadCount])
+  );
 
   // Pulsing animation for badge
   useEffect(() => {
@@ -40,24 +59,11 @@ export const NotificationBell: React.FC = () => {
 
   useEffect(() => {
     if (!user) return;
-
-    const fetchUnreadCount = async () => {
-      const { count } = await supabaseRead
-        .from('notifications')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', user.id)
-        .eq('is_read', false);
-
-      if (count !== null) {
-        setUnreadCount(count);
-      }
-    };
-
     fetchUnreadCount();
 
     // Subscribe to real-time updates
     const channel = supabaseRead
-      .channel('notifications')
+      .channel(`user-notifs-${user.id}`)
       .on(
         'postgres_changes',
         {
@@ -75,7 +81,7 @@ export const NotificationBell: React.FC = () => {
     return () => {
       supabaseRead.removeChannel(channel);
     };
-  }, [user]);
+  }, [user, fetchUnreadCount]);
 
   return (
     <TouchableOpacity
@@ -93,7 +99,7 @@ export const NotificationBell: React.FC = () => {
           ]}
         >
           <Text style={styles.badgeText}>
-            {unreadCount > 9 ? '9+' : unreadCount}
+            {unreadCount}
           </Text>
         </Animated.View>
       )}

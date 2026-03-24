@@ -1,8 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
 
-const SUPABASE_URL = 'https://uivgyexyakfincwgghgh.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVpdmd5ZXh5YWtmaW5jd2dnaGdoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3MTY4MDYsImV4cCI6MjA4MzI5MjgwNn0.Crz4L5Sbev3Jft6ou1SFz7htpWSWRxVaTaYgDE2DGso';
-
 type OwnerEndpoint =
   | 'owner-advertisers-core'
   | 'owner-advertisers-tiktok'
@@ -35,7 +32,6 @@ const ACTION_TO_ENDPOINT: Record<string, OwnerEndpoint> = {
 };
 
 export async function callOwnerAdvertisers(action: string, params: Record<string, any> = {}) {
-  const { data: { session } } = await supabase.auth.getSession();
   const endpoint = ACTION_TO_ENDPOINT[action] || 'owner-advertisers-core';
 
   // Remove undefined values from params to avoid JSON.stringify issues
@@ -52,50 +48,21 @@ export async function callOwnerAdvertisers(action: string, params: Record<string
     requestBody: JSON.stringify(requestBody).substring(0, 200)
   });
 
-  const response = await fetch(`${SUPABASE_URL}/functions/v1/${endpoint}`, {
-    method: 'POST',
-    headers: {
-      ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
-      'apikey': SUPABASE_ANON_KEY,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(requestBody),
+  const { data, error } = await supabase.functions.invoke(endpoint, {
+    body: requestBody,
   });
-  
-  console.log('[ownerApi] Response status:', response.status, response.statusText);
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    let errorMessage = `API Error: ${response.status} ${response.statusText}`;
-    let errorDetails: any = null;
-    
-    try {
-      const errorJson = JSON.parse(errorText);
-      errorMessage = errorJson.error || errorMessage;
-      errorDetails = errorJson;
-      console.error('[ownerApi] Error response:', {
-        status: response.status,
-        statusText: response.statusText,
-        error: errorJson,
-      });
-    } catch {
-      errorMessage = errorText || errorMessage;
-      console.error('[ownerApi] Error text:', {
-        status: response.status,
-        statusText: response.statusText,
-        text: errorText.substring(0, 500),
-      });
-    }
-    
-    const error = new Error(errorMessage);
-    (error as any).status = response.status;
-    (error as any).details = errorDetails;
+ 
+  if (error) {
+    console.error('[ownerApi] Edge invoke error:', {
+      endpoint,
+      action,
+      message: error.message,
+    });
     throw error;
   }
 
-  const result = await response.json();
-  console.log('[ownerApi] Success response:', { action, hasError: !!result.error });
-  return result;
+  console.log('[ownerApi] Success response:', { action, hasError: !!data?.error });
+  return data;
 }
 
 // API Actions

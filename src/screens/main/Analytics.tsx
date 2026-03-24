@@ -257,9 +257,6 @@ const createStyles = (colors: any, insets: any, isRTL?: boolean) => StyleSheet.c
   headerRTL: {
     flexDirection: 'row',
   },
-  rowReverse: {
-    flexDirection: 'row',
-  },
   textRTL: {
     textAlign: 'right',
     writingDirection: 'rtl',

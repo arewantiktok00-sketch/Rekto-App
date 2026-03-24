@@ -5,6 +5,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { Text } from '@/components/common/Text';
 import { X } from 'lucide-react-native';
 import { spacing, borderRadius } from '@/theme/spacing';
+import { safeCall } from '@/utils/safeCall';
 
 interface ExpiredOfferModalProps {
   visible: boolean;
@@ -41,16 +42,16 @@ export const ExpiredOfferModal: React.FC<ExpiredOfferModalProps> = ({ visible, o
       visible={visible}
       animationType="fade"
       transparent
-      onRequestClose={onClose}
+      onRequestClose={() => safeCall(onClose)}
     >
       <View style={styles.overlay}>
         <View style={styles.card}>
-          <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+          <TouchableOpacity style={styles.closeButton} onPress={() => safeCall(onClose)}>
             <X size={18} color={colors.foreground.DEFAULT} />
           </TouchableOpacity>
           <Text style={styles.title}>{strings.title}</Text>
           <Text style={styles.message}>{strings.message}</Text>
-          <TouchableOpacity style={styles.okButton} onPress={onClose}>
+          <TouchableOpacity style={styles.okButton} onPress={() => safeCall(onClose)}>
             <Text style={styles.okButtonText}>{strings.button}</Text>
           </TouchableOpacity>
         </View>

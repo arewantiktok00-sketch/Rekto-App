@@ -2,6 +2,7 @@ import { supabase, supabaseRead } from '@/integrations/supabase/client';
 import { AppSettings, DEFAULT_SETTINGS } from '@/types/remote-config';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, ReactNode, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { Platform } from 'react-native';
 
 const CACHE_KEY = 'app_settings_cache';
 
@@ -13,11 +14,12 @@ interface RemoteConfigContextType {
   loading: boolean;
   error: string | null;
   refetch: () => Promise<void>;
-  isFeatureEnabled: (feature: keyof AppSettings['features']) => boolean;
+  isFeatureEnabled: (feature: string) => boolean;
   isMaintenanceMode: boolean;
   maintenanceMessage: string;
   bannerConfig: AppSettings['ui_text'];
   realtimeStatus: 'SUBSCRIBED' | 'CHANNEL_ERROR' | 'TIMED_OUT' | 'CLOSED' | null;
+  isPaymentsHidden: boolean;
 }
 
 const RemoteConfigContext = createContext<RemoteConfigContextType | undefined>(undefined);
@@ -32,6 +34,7 @@ export const RemoteConfigProvider: React.FC<{ children: ReactNode }> = ({ childr
   // Legacy: settings always returns config or defaults
   const settings = config || DEFAULT_SETTINGS;
   const loading = isLoading;
+  const isPaymentsHidden = Platform.OS === 'ios' && Boolean(settings.features.ios_payments_hidden);
 
   // Load cached settings INSTANTLY on mount (non-blocking)
   useEffect(() => {
@@ -151,7 +154,7 @@ export const RemoteConfigProvider: React.FC<{ children: ReactNode }> = ({ childr
       }
 
       configChannelRef.current = supabase
-        .channel('app-settings-global')
+        .channel('app-settings-realtime')
         .on(
           'postgres_changes',
           {
@@ -171,6 +174,7 @@ export const RemoteConfigProvider: React.FC<{ children: ReactNode }> = ({ childr
                 ui_text: { ...DEFAULT_SETTINGS.ui_text, ...(newValue.ui_text || {}) },
                 discount: { ...DEFAULT_SETTINGS.discount, ...(newValue.discount || {}) },
                 pricing: { ...DEFAULT_SETTINGS.pricing, ...(newValue.pricing || {}) },
+                update: { ...DEFAULT_SETTINGS.update, ...(newValue.update || {}) },
               };
               setConfig(mergedSettings);
               // Update cache for next app launch
@@ -196,8 +200,8 @@ export const RemoteConfigProvider: React.FC<{ children: ReactNode }> = ({ childr
   }, [fetchConfig]);
 
   const isFeatureEnabled = useCallback(
-    (feature: keyof AppSettings['features']): boolean => {
-      return settings.features[feature] ?? true;
+    (feature: string): boolean => {
+      return (settings.features as Record<string, boolean | undefined>)?.[feature] ?? true;
     },
     [settings.features]
   );
@@ -215,6 +219,7 @@ export const RemoteConfigProvider: React.FC<{ children: ReactNode }> = ({ childr
     maintenanceMessage: settings.maintenance.message,
     bannerConfig: settings.ui_text,
     realtimeStatus,
+    isPaymentsHidden,
   };
 
   return (

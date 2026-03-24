@@ -1,29 +1,86 @@
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { ArrowLeft, DollarSign, Eye, Target, Trophy } from 'lucide-react-native';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Dimensions,
+  FlatList,
+  Image,
+  Linking,
+  StyleSheet,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
+
 import { Text } from '@/components/common/Text';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useRemoteConfig } from '@/contexts/RemoteConfigContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { useAppSettingsRealtime } from '@/hooks/useAppSettingsRealtime';
 import { supabase } from '@/integrations/supabase/client';
-import { getGlobalCache, setTopResultsCache } from '@/services/globalCache';
-import { getFontFamily, getNumberFontFamily } from '@/utils/getFontFamily';
-import { iconTransformRTL } from '@/utils/rtl';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useNavigation } from '@react-navigation/native';
-import { ArrowRight, DollarSign, Eye, Target, Trophy } from 'lucide-react-native';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Dimensions, Image, InteractionManager, Linking, StyleSheet, TouchableOpacity, View } from 'react-native';
-import Animated, { interpolate, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
-import Carousel from 'react-native-reanimated-carousel';
+import { isRTL as getIsRTL } from '@/utils/rtl';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const CARD_HORIZONTAL_PADDING = 12 * 2;
-const CARD_INNER_PADDING = 16 * 2;
-const CAROUSEL_WIDTH = Math.min(SCREEN_WIDTH - CARD_HORIZONTAL_PADDING - CARD_INNER_PADDING, SCREEN_WIDTH - 56);
+const SCREEN_WIDTH = Dimensions.get('window').width;
 
-const isValidThumbnail = (url?: string | null) =>
-  typeof url === 'string' && url.startsWith('https://') && !url.includes('tiktokcdn.com');
+// Thumbnail is valid only if it is a Supabase Storage URL (NOT TikTok CDN).
+function getThumbnailUrl(c: Record<string, unknown>): string {
+  const url =
+    (c.thumbnail_url as string) ||
+    (c.thumbnail as string) ||
+    (c.cover_image_url as string) ||
+    (c.cover_url as string) ||
+    '';
+  const s = typeof url === 'string' ? url.trim() : '';
+  if (!s.startsWith('https://') || s.includes('tiktokcdn.com')) return '';
+  return s;
+}
 
-interface TopResultCampaign {
+function getViews(c: Record<string, unknown>): number {
+  const v = c.views ?? c.impressions ?? c.play_count ?? 0;
+  return Number(v) || 0;
+}
+
+function getSpend(c: Record<string, unknown>): number {
+  const s = c.spend ?? c.total_spend ?? c.amount ?? 0;
+  return Number(s) || 0;
+}
+
+const translations = {
+  ckb: {
+    topResults: 'باشترین ئەنجامەکان',
+    seeMore: 'بینینی زیاتر',
+    views: 'بینراو',
+    conversions: 'نامە',
+    costPerConv: 'خەرجی',
+    costPer1K: 'خەرجی / ١ک',
+    clickToWatch: 'گرتە بکە بۆ بینین',
+    ctaButton: 'وەک ئەمە بڵاوی بکەرەوە',
+    participate: 'بەشداربە',
+    loading: 'بارکردنەوە...',
+  },
+  ar: {
+    topResults: 'أفضل النتائج',
+    seeMore: 'عرض المزيد',
+    views: 'المشاهدات',
+    conversions: 'التحويلات',
+    costPerConv: 'تكلفة / تحويل',
+    costPer1K: 'تكلفة / ١ك',
+    clickToWatch: 'انقر للمشاهدة',
+    ctaButton: 'روّج مثل هذا',
+    participate: 'شارك',
+    loading: 'جاري التحميل...',
+  },
+} as const;
+
+function formatNumber(num: number): string {
+  if (!num || num <= 0) return '0';
+  if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + 'M';
+  if (num >= 1_000) return (num / 1_000).toFixed(1) + 'K';
+  return num.toString();
+}
+
+// Exact shape from featured-campaign get_top
+interface TopCampaign {
   id: string;
   title: string;
   thumbnail_url: string | null;
@@ -32,616 +89,621 @@ interface TopResultCampaign {
   views: number;
   cpm: number;
   video_url: string | null;
-  tiktok_public_url?: string | null;
-  tiktok_video_id?: string | null;
   leads: number;
   objective: string | null;
   show_conversions: boolean;
   cost_per_conversion: number;
   rank: number;
-  manual_rank: number | null;
 }
 
-const CACHE_KEY = 'top_results_cache';
-const CACHE_EXPIRY = 5 * 60 * 1000;
-
-const DotIndicator: React.FC<{ index: number; activeIndex: { value: number }; styles: { dot: any } }> = ({
-  index,
-  activeIndex,
-  styles,
-}) => {
-  const animatedStyle = useAnimatedStyle(() => {
-    const width = interpolate(activeIndex.value, [index - 1, index, index + 1], [8, 24, 8], 'clamp');
-    const opacity = interpolate(activeIndex.value, [index - 1, index, index + 1], [0.3, 1, 0.3], 'clamp');
-    return { width, opacity };
-  });
-
-  return <Animated.View style={[styles.dot, animatedStyle]} />;
-};
-
-export const TopResultsList: React.FC = () => {
-  const { t, language, isRTL } = useLanguage();
-  const { colors } = useTheme();
-  const { settings: config } = useRemoteConfig();
+const TopResultsListInner: React.FC = () => {
+  const { language } = useLanguage();
+  const { colors, isDark } = useTheme();
+  const { isPaymentsHidden } = useRemoteConfig();
   const navigation = useNavigation();
-  const styles = useMemo(() => createStyles(colors, isRTL, language), [colors, isRTL, language]);
-  const [items, setItems] = useState<TopResultCampaign[]>(() => getGlobalCache().topResults || []);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const activeIndex = useSharedValue(0);
-  const lastFetchRef = useRef(0);
-  const MIN_FETCH_INTERVAL = 2000;
+  const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
+  const locale = language === 'ar' ? 'ar' : 'ckb';
+  const t = translations[locale];
+  const isRTL = getIsRTL(language);
 
-  const loadCache = useCallback(async () => {
+  const [campaigns, setCampaigns] = useState<TopCampaign[]>([]);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [enabled, setEnabled] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [videoLoadingId, setVideoLoadingId] = useState<string | null>(null);
+
+  const initialLoadDoneRef = useRef(false);
+  const lastFetchTimeRef = useRef(0);
+  const listRef = useRef<FlatList<TopCampaign> | null>(null);
+
+  const fetchEnabled = useCallback(async () => {
     try {
-      const cached = await AsyncStorage.getItem(CACHE_KEY);
-      if (!cached) return;
-      const parsed = JSON.parse(cached);
-      const cacheAge = Date.now() - (parsed.timestamp || 0);
-      if (parsed.data && cacheAge < CACHE_EXPIRY) {
-        setItems(parsed.data);
-        setTopResultsCache(parsed.data);
-      }
+      const { data } = await supabase.functions.invoke('app-settings', {
+        body: { action: 'get', key: 'global' },
+      });
+      const value = data?.settings?.value ?? data?.value;
+      const isEnabled = value?.features?.featured_story_enabled ?? true;
+      setEnabled(!!isEnabled);
     } catch {
-      // Ignore cache errors
+      setEnabled(true);
     }
   }, []);
 
-  const fetchTopResults = useCallback(async () => {
-    try {
-      const now = Date.now();
-      if (now - lastFetchRef.current < MIN_FETCH_INTERVAL) {
-        return;
-      }
-      lastFetchRef.current = now;
+  const fetchTopCampaigns = useCallback(async (silent = false) => {
+    const now = Date.now();
+    if (!initialLoadDoneRef.current) {
+      setLoading(true);
+    } else if (silent) {
+      // Silent refresh: no loading state change
+    } else if (now - lastFetchTimeRef.current < 60000) {
+      return;
+    }
 
+    if (!silent) lastFetchTimeRef.current = now;
+
+    try {
       const { data, error } = await supabase.functions.invoke('featured-campaign', {
         body: { action: 'get_top', limit: 3 },
       });
-
-      if (!error && data?.campaigns) {
-        const campaigns = data.campaigns as TopResultCampaign[];
-        setItems(campaigns);
-        setTopResultsCache(campaigns);
-        await AsyncStorage.setItem(
-          CACHE_KEY,
-          JSON.stringify({ data: campaigns, timestamp: Date.now() })
-        );
+      const list = data?.campaigns as TopCampaign[] | undefined;
+      if (!error && Array.isArray(list)) {
+        setCampaigns(prev => {
+          const prevIds = prev.map(c => c.id).join(',');
+          const nextIds = list.map(c => c.id).join(',');
+          if (prevIds === nextIds && prev.length === list.length) return prev;
+          return list.length > 0 ? list : prev;
+        });
       }
-    } catch {
-      // Ignore fetch errors
+    } catch (e) {
+      if (__DEV__) console.warn('[TopResultsList] fetchTopCampaigns error:', e);
+    } finally {
+      initialLoadDoneRef.current = true;
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    loadCache();
-    InteractionManager.runAfterInteractions(() => {
-      fetchTopResults();
-    });
+    fetchEnabled();
+    fetchTopCampaigns();
+  }, [fetchEnabled, fetchTopCampaigns]);
 
+  useFocusEffect(
+    useCallback(() => {
+      fetchTopCampaigns(true);
+    }, [fetchTopCampaigns])
+  );
+
+  // Auto-refresh top results in background every 90s (silent, no loading state)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchTopCampaigns(true);
+    }, 90000);
+    return () => clearInterval(interval);
+  }, [fetchTopCampaigns]);
+
+  // Realtime: only toggle feature flag, never refetch campaigns directly
+  useEffect(() => {
     const channel = supabase
-      .channel('top-results-updates')
+      .channel('app-settings-global')
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
-          table: 'campaigns',
+          table: 'app_settings',
+          filter: 'key=eq.global',
         },
-        () => fetchTopResults()
+        payload => {
+          const value = (payload.new as any)?.value;
+          const isEnabled = value?.features?.featured_story_enabled ?? true;
+          setEnabled(!!isEnabled);
+        }
       )
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [loadCache, fetchTopResults]);
+  }, []);
 
-  useAppSettingsRealtime({
-    enabled: true,
-    settingsKey: 'global',
-    onUpdate: () => {
-      fetchTopResults();
+  // Auto-advance every 4 seconds when multiple campaigns
+  useEffect(() => {
+    if (campaigns.length <= 1) return;
+    const timer = setInterval(() => {
+      setActiveIndex(prev => {
+        const next = (prev + 1) % campaigns.length;
+        listRef.current?.scrollToIndex({ index: next, animated: true });
+        return next;
+      });
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [campaigns.length]);
+
+  const openVideo = useCallback(
+    async (campaign: TopCampaign) => {
+      const direct = campaign.video_url ?? '';
+      if (direct && direct.includes('/@')) {
+        Linking.openURL(direct);
+        return;
+      }
+
+      setVideoLoadingId(campaign.id);
+      try {
+        const { data } = await supabase.functions.invoke('get-campaign-video', {
+          body: { id: campaign.id },
+        });
+        const url = data?.video_url ?? null;
+        if (url && typeof url === 'string') {
+          Linking.openURL(url);
+        } else {
+          const msg = locale === 'ar' ? 'لا يوجد فيديو' : 'ڤیدیۆ بەردەست نییە';
+          // eslint-disable-next-line no-console
+          console.warn('[TopResultsList] video url missing');
+          // No toast util imported here to avoid extra flicker; Dashboard may toast separately
+          console.log(msg);
+        }
+      } catch (e) {
+        const msg = locale === 'ar' ? 'لا يوجد فيديو' : 'ڤیدیۆ بەردەست نییە';
+        console.log(msg, e);
+      } finally {
+        setVideoLoadingId(null);
+      }
     },
-  });
-
-  useAppSettingsRealtime({
-    enabled: true,
-    settingsKey: 'featured_campaign_id',
-    onUpdate: () => {
-      fetchTopResults();
-    },
-  });
-
-  const carouselData = useMemo(
-    () => (isRTL ? [...items].reverse() : items),
-    [items, isRTL]
+    [locale]
   );
 
-  const topResultsEnabled = config?.features?.featured_story_enabled ?? true;
-  if (!topResultsEnabled) return null;
-  if (carouselData.length === 0) return null;
+  if (!enabled) return null;
 
-  const getRankColor = (rank: number) => {
-    switch (rank) {
-      case 1:
-        return { bg: '#FACC15', text: '#111827' };
-      case 2:
-        return { bg: '#D1D5DB', text: '#111827' };
-      case 3:
-        return { bg: '#D97706', text: '#111827' };
-      default:
-        return { bg: '#F3F4F6', text: '#111827' };
-    }
-  };
+  const initialLoading = loading && !initialLoadDoneRef.current;
+  if (!initialLoading && campaigns.length === 0) {
+    // Feature enabled, but no campaigns — hide entire section.
+    return null;
+  }
 
-  const isValidTikTokUrl = (url?: string | null) =>
-    typeof url === 'string' && url.includes('/@');
+  const renderItem = ({ item }: { item: TopCampaign }) => {
+    const c = item as unknown as Record<string, unknown>;
+    const views = getViews(c);
+    const spend = getSpend(c);
+    const leads = Number(item.leads ?? 0) || 0;
 
-  const resolveLegacyVideoUrl = async (campaignId: string) => {
-    try {
-      const { data, error } = await supabase.functions.invoke('tiktok-video-info', {
-        body: { campaignId },
-      });
-      if (error) {
-        if (__DEV__) {
-          console.warn('[TopResultsList] Legacy video fetch failed:', error.message);
-        }
-        return null;
-      }
-      return data?.videoInfo?.tiktokUrl || data?.tiktokUrl || null;
-    } catch (err) {
-      if (__DEV__) {
-        console.warn('[TopResultsList] Legacy video fetch error:', err);
-      }
-      return null;
-    }
-  };
+    const showConv = item.show_conversions === true;
+    const costValue = showConv
+      ? (item.cost_per_conversion != null
+          ? item.cost_per_conversion.toFixed(2)
+          : leads > 0
+            ? (spend / leads).toFixed(2)
+            : '0.00')
+      : views > 0
+        ? ((spend / views) * 1000).toFixed(2)
+        : '0.00';
+    const costLabel = showConv ? t.costPerConv : t.costPer1K;
 
-  const openVideoForItem = async (item: TopResultCampaign) => {
-    const publicUrl = item.tiktok_public_url || null;
-    const directUrl = item.video_url || null;
-    let url = isValidTikTokUrl(publicUrl) ? publicUrl : null;
-    if (!url && isValidTikTokUrl(directUrl)) {
-      url = directUrl;
-    }
-    if (!url && item.id) {
-      url = await resolveLegacyVideoUrl(item.id);
-    }
-    if (!url) return;
-    await Linking.openURL(url);
+    const thumbUrl = getThumbnailUrl(c);
+    const hasThumb = thumbUrl.length > 0;
+
+    const rank = Number(item.rank ?? 0) || 1;
+    const rankBg = rank === 1 ? '#FACC15' : rank === 2 ? '#D1D5DB' : '#D97706';
+    const rankText = rank === 1 ? '#854D0E' : rank === 2 ? '#374151' : '#FFF7ED';
+
+    const cardBg = isDark ? '#18181B' : '#FFFFFF';
+    const cardBorder = isDark ? '#3F3F46' : '#E4E4E7';
+    const isVideoLoading = videoLoadingId === item.id;
+
+    return (
+      <View
+        style={{
+          width: SCREEN_WIDTH - 32,
+          height: 220,
+          justifyContent: 'center',
+          alignItems: 'center',
+        }}
+      >
+        <View style={[styles.outerCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+          <View style={styles.mainRow}>
+            {/* LEFT: 3-column metrics grid */}
+            <View style={styles.metricsGrid}>
+              <View style={[styles.metricCol, isDark && styles.metricColDark]}>
+                <Eye size={18} color="#7C3AED" />
+                <Text style={styles.metricLabel}>{t.views}</Text>
+                <Text style={styles.metricValue} useNumbersFont>
+                  {formatNumber(views)}
+                </Text>
+              </View>
+              <View style={[styles.metricCol, isDark && styles.metricColDark]}>
+                <Target size={18} color="#7C3AED" />
+                <Text style={styles.metricLabel}>{t.conversions}</Text>
+                <Text style={styles.metricValue} useNumbersFont>
+                  {formatNumber(leads)}
+                </Text>
+              </View>
+              {!isPaymentsHidden && (
+                <View style={[styles.metricCol, isDark && styles.metricColDark]}>
+                  <DollarSign size={18} color="#EF4444" />
+                  <Text style={styles.metricLabel}>{costLabel}</Text>
+                  <Text style={styles.metricCostValue} useNumbersFont>
+                    {'$' + costValue}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* RIGHT: 96x96 thumbnail with rank badge overlay */}
+            <View style={styles.thumbWrap}>
+              {hasThumb ? (
+                <Image
+                  source={{ uri: thumbUrl }}
+                  style={[styles.thumb, isDark && styles.thumbDark]}
+                  resizeMode="cover"
+                  onError={() => {
+                    // If load fails, render placeholder instead.
+                  }}
+                />
+              ) : (
+                <View style={[styles.thumbPlaceholder, isDark && styles.thumbPlaceholderDark]}>
+                  <Trophy size={32} color="#71717A" />
+                </View>
+              )}
+              <View
+                style={[
+                  styles.rankBadge,
+                  { backgroundColor: rankBg },
+                  (isRTL ? styles.rankBadgeRTL : styles.rankBadgeLTR),
+                ]}
+              >
+                <Trophy size={12} color={rankText} />
+                <Text style={[styles.rankBadgeText, { color: rankText }]} useNumbersFont>
+                  {rank.toString()}
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Click to watch */}
+          {!isPaymentsHidden && item.video_url ? (
+            <TouchableOpacity
+              onPress={() => openVideo(item)}
+              disabled={isVideoLoading}
+              style={styles.watchRow}
+            >
+              {isVideoLoading ? (
+                <ActivityIndicator size="small" color="#7C3AED" />
+              ) : (
+                <>
+                  <Text style={styles.watchText}>{t.clickToWatch}</Text>
+                  <ArrowLeft
+                    size={16}
+                    color="#7C3AED"
+                    style={{ transform: [{ scaleX: isRTL ? -1 : 1 }] }}
+                  />
+                </>
+              )}
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      </View>
+    );
   };
 
   return (
-    <View style={styles.section}>
+    <View style={styles.section} collapsable={false}>
       <View style={styles.sectionHeader}>
-        <View style={styles.sectionIcon}>
-          <Trophy size={18} color="#7C3AED" />
+        <View style={styles.sectionHeaderLeft}>
+          <View style={styles.sectionIcon}>
+            <Trophy size={20} color="#6D28D9" />
+          </View>
+          <Text style={styles.sectionTitle}>{t.topResults}</Text>
         </View>
-        <Text style={styles.sectionTitle}>
-          {t('topResults') || 'Top Results'}
-        </Text>
         <TouchableOpacity
-          activeOpacity={0.7}
-          style={styles.seeMore}
-          onPress={() => navigation.navigate('TopResults' as never)}
+          onPress={() => (navigation as any).navigate('TopResults' as never)}
+          style={styles.sectionLink}
         >
-          <Text style={[styles.seeMoreText, isRTL && styles.seeMoreTextRTL]}>{t('seeMore') || 'See More'}</Text>
-          <ArrowRight size={14} color="#7C3AED" style={iconTransformRTL()} />
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.card}>
-        <View style={styles.carouselWrapper}>
-          <Carousel
-            width={CAROUSEL_WIDTH}
-            height={120}
-            data={carouselData}
-            autoPlay
-            autoPlayInterval={4000}
-            loop
-            onSnapToItem={(index) => {
-              setCurrentIndex(index);
-              activeIndex.value = withTiming(index, { duration: 300 });
-            }}
-            scrollAnimationDuration={300}
-            renderItem={({ item }) => {
-              const handleViewVideo = async () => {
-                await openVideoForItem(item);
-              };
-
-              const rankColors = getRankColor(item.rank || 0);
-              const thumbnailUrl = item.thumbnail_url || null;
-              const isThumbnailValid = isValidThumbnail(thumbnailUrl);
-
-              return (
-                <View style={styles.slideOuter}>
-                  <View style={[styles.slideContent, isRTL && styles.rowReverse]}>
-                    <View style={[styles.metricsRow, isRTL && styles.metricsRowRTL]}>
-                      <View style={styles.metricBox}>
-                        <Eye size={14} color="#7C3AED" />
-                        <Text style={styles.metricLabel} numberOfLines={2}>
-                          {t('views') || 'Views'}
-                        </Text>
-                        <Text style={styles.metricValue}>
-                          {item.views >= 1000 ? `${(item.views / 1000).toFixed(1)}K` : item.views}
-                        </Text>
-                      </View>
-                      <View style={styles.metricBox}>
-                        <Target size={14} color="#7C3AED" />
-                        <Text style={styles.metricLabel} numberOfLines={2}>
-                          {t('conversions') || 'Conversions'}
-                        </Text>
-                        <Text style={styles.metricValue}>{item.leads}</Text>
-                      </View>
-                      <View style={styles.metricBox}>
-                        <DollarSign size={14} color="#7C3AED" />
-                        <Text style={styles.metricLabel} numberOfLines={2}>
-                          {item.show_conversions
-                            ? t('costPerConv') || 'Cost/Conv'
-                            : t('costPer1KViews') || 'Cost/1K'}
-                        </Text>
-                        <Text style={[styles.metricValue, styles.metricValuePurple]}>
-                          {item.show_conversions
-                            ? `$${item.cost_per_conversion?.toFixed(2) || '0.00'}`
-                            : item.views > 0
-                            ? `$${((item.spend / item.views) * 1000).toFixed(2)}`
-                            : '$0.00'}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.thumbnailContainer}>
-                      <View style={styles.thumbnailWrapContainer}>
-                        <TouchableOpacity
-                          style={styles.thumbnailWrap}
-                          onPress={handleViewVideo}
-                          activeOpacity={0.85}
-                        >
-                          {isThumbnailValid ? (
-                            <Image
-                              source={{ uri: thumbnailUrl }}
-                              style={styles.thumbnail}
-                              resizeMode="cover"
-                            />
-                          ) : (
-                            <View
-                              style={[
-                                styles.thumbnail,
-                                styles.thumbnailPlaceholder,
-                                { backgroundColor: '#E5E7EB', alignItems: 'center', justifyContent: 'center' },
-                              ]}
-                            >
-                              <Trophy size={18} color="#9CA3AF" />
-                            </View>
-                          )}
-                        </TouchableOpacity>
-                        <View
-                          style={[
-                            styles.rankBadgeOverlay,
-                            { backgroundColor: rankColors.bg },
-                          ]}
-                        >
-                          <Trophy size={10} color={rankColors.text} />
-                          <Text style={[styles.rankText, { color: rankColors.text }]}>
-                            #{item.rank || 1}
-                          </Text>
-                        </View>
-                      </View>
-                    </View>
-                  </View>
-                </View>
-              );
-            }}
+          <Text style={styles.sectionLinkText}>{t.seeMore}</Text>
+          <ArrowLeft
+            size={16}
+            color="#7C3AED"
+            style={{ transform: [{ scaleX: isRTL ? -1 : 1 }] }}
           />
-        </View>
-
-        <TouchableOpacity
-          style={[styles.watchRow, isRTL && styles.rowReverse]}
-          activeOpacity={0.8}
-          onPress={async () => {
-            const item = carouselData[currentIndex] || carouselData[0];
-            if (!item) return;
-            await openVideoForItem(item);
-          }}
-        >
-          <Text style={styles.watchText}>{t('clickToWatch') || 'Click to watch'}</Text>
-          <ArrowRight size={14} color="#7C3AED" style={iconTransformRTL()} />
-        </TouchableOpacity>
-
-        <View style={styles.dotsRow}>
-          {carouselData.slice(0, 3).map((_, idx) => (
-            <DotIndicator key={idx} index={idx} activeIndex={activeIndex} styles={styles} />
-          ))}
-        </View>
-      </View>
-
-      <View style={[styles.promoteCard, isRTL && styles.rowReverse]}>
-        <Text style={[styles.promoteText, isRTL && styles.promoteTextRTL]}>{t('promoteLikeThis') || 'Promote Like This'}</Text>
-        <TouchableOpacity
-          style={[styles.promoteButton, isRTL && styles.rowReverse]}
-          activeOpacity={0.85}
-          onPress={() => navigation.navigate('Main' as never, { screen: 'CreateAd' } as never)}
-        >
-          <Text style={[styles.promoteButtonText, isRTL && styles.promoteTextRTL]}>{t('participate') || 'Participate'}</Text>
-          <ArrowRight size={14} color={colors.primary.foreground} style={iconTransformRTL()} />
         </TouchableOpacity>
       </View>
+
+      {initialLoading ? (
+          <View style={styles.emptyOrLoadingBox}>
+          <ActivityIndicator size="small" color="#7C3AED" />
+          <Text style={styles.emptyOrLoadingText}>{t.loading}</Text>
+        </View>
+      ) : (
+        <>
+          <FlatList
+            ref={listRef}
+            data={campaigns || []}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            removeClippedSubviews={false}
+            keyExtractor={(item) => item.id}
+            style={{ width: SCREEN_WIDTH - 32, alignSelf: 'center' }}
+            initialNumToRender={3}
+            windowSize={5}
+            maxToRenderPerBatch={3}
+            getItemLayout={(_, index) => {
+              const length = SCREEN_WIDTH - 32;
+              return { length, offset: length * index, index };
+            }}
+            onMomentumScrollEnd={e => {
+              const width = SCREEN_WIDTH - 32;
+              const index = Math.round(e.nativeEvent.contentOffset.x / width);
+              setActiveIndex(index);
+            }}
+            renderItem={renderItem}
+          />
+
+          <View style={styles.dotsRow}>
+            {campaigns.map((_, index) => (
+              <View
+                key={index}
+                style={[
+                  styles.dot,
+                  index === activeIndex ? styles.dotActive : styles.dotInactive,
+                ]}
+              />
+            ))}
+          </View>
+
+          {!isPaymentsHidden && (
+            <View style={[styles.ctaCard, isDark && styles.ctaCardDark]}>
+              <Text style={styles.ctaText}>{t.ctaButton}</Text>
+              <TouchableOpacity
+                onPress={() => (navigation as any).navigate('Main', { screen: 'CreateAd' })}
+                activeOpacity={0.85}
+              >
+                <LinearGradient
+                  colors={['#7C3AED', '#9333EA']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.ctaButton}
+                >
+                  <Text style={styles.ctaButtonText}>{t.participate}</Text>
+                  <ArrowLeft size={16} color="#FFFFFF" style={{ transform: [{ scaleX: isRTL ? -1 : 1 }] }} />
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          )}
+        </>
+      )}
     </View>
   );
 };
 
-const createStyles = (colors: any, isRTL: boolean, language: 'ckb' | 'ar') => {
-  const fontRegular = getFontFamily(language, 'regular');
-  const fontMedium = getFontFamily(language, 'medium');
-  const fontSemiBold = getFontFamily(language, 'semibold');
-  const numberSemiBold = getNumberFontFamily('semibold');
-  const numberBold = getNumberFontFamily('bold');
+export const TopResultsList = memo(TopResultsListInner);
 
-  return StyleSheet.create({
-    section: {
-      marginHorizontal: 0,
-      marginBottom: 16,
-    },
-    sectionHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      marginBottom: 8,
-    },
-    sectionIcon: {
-      width: 28,
-      height: 28,
-      borderRadius: 8,
-      backgroundColor: 'rgba(124, 58, 237, 0.15)',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    sectionTitle: {
-      fontSize: 14,
-      color: '#111827',
-      flex: 1,
-      fontFamily: fontSemiBold,
-      textAlign: 'left',
-      writingDirection: 'rtl',
-    },
-    seeMore: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-    },
-    seeMoreText: {
-      fontSize: 12,
-      color: '#7C3AED',
-      fontFamily: fontMedium,
-    },
-    seeMoreTextRTL: {
-      textAlign: 'right',
-      writingDirection: 'rtl',
-    },
-    card: {
-      borderRadius: 16,
-      padding: 16,
-      backgroundColor: colors.card.background,
-      borderWidth: 1,
-      borderColor: '#E5E7EB',
-      marginBottom: 12,
-      overflow: 'hidden',
-      paddingTop: 18,
-      paddingBottom: 12,
-    },
-    carouselWrapper: {
-      height: 132,
-      justifyContent: 'center',
-      overflow: 'hidden',
-      width: '100%',
-    },
-    slideOuter: {
-      flex: 1,
-      width: '100%',
-      maxWidth: '100%',
-      borderRadius: 12,
-      overflow: 'hidden',
-      paddingHorizontal: 4,
-    },
-    slideContent: {
-      flex: 1,
-      width: '100%',
-      maxWidth: '100%',
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-    },
-    rowReverse: {
-      flexDirection: 'row-reverse',
-    },
-    cardHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      marginBottom: 8,
-    },
-    rankBadge: {
-      paddingHorizontal: 8,
-      paddingVertical: 4,
-      borderRadius: 999,
-      backgroundColor: '#FACC15',
-    },
-    rankText: {
-      color: '#111827',
-      fontSize: 11,
-      fontFamily: numberSemiBold,
-    },
-    cardContent: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-    },
-    metricsRow: {
-      flex: 1,
-      flexDirection: 'row',
-      gap: 6,
-      marginEnd: 8,
-      minWidth: 0,
-    },
-    metricsRowRTL: {
-      marginEnd: 0,
-      marginStart: 8,
-    },
-    metricBox: {
-      flex: 1,
-      backgroundColor: '#F3F4F6',
-      borderRadius: 12,
-      paddingVertical: 8,
-      paddingHorizontal: 4,
-      minHeight: 70,
-      minWidth: 0,
-      alignItems: 'center',
-      gap: 2,
-    },
-    metricLabel: {
-      fontSize: 9,
-      color: '#111827',
-      textAlign: 'center',
-      lineHeight: 11,
-      fontFamily: fontRegular,
-    },
-    metricValue: {
-      fontSize: 13,
-      color: '#111827',
-      fontWeight: '700',
-      fontFamily: numberBold,
-    },
-    metricValuePurple: {
-      color: '#7C3AED',
-      fontWeight: '700',
-      fontFamily: numberBold,
-    },
-    thumbnailContainer: {
-      width: 72,
-      height: 72,
-      minWidth: 72,
-      maxWidth: 72,
-      position: 'relative',
-      flexShrink: 0,
-    },
-    thumbnailWrapContainer: {
-      width: 72,
-      height: 72,
-      borderRadius: 12,
-      overflow: 'hidden',
-      position: 'relative',
-    },
-    thumbnailWrap: {
-      width: 72,
-      height: 72,
-      borderRadius: 12,
-      overflow: 'hidden',
-    },
-    thumbnail: {
-      width: 72,
-      height: 72,
-      borderRadius: 12,
-    },
-    thumbnailPlaceholder: {
-      backgroundColor: '#374151',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    thumbnailPlaceholderText: {
-      marginTop: 4,
-      fontSize: 9,
-      color: '#E5E7EB',
-      textAlign: 'center',
-    },
-    rankBadgeOverlay: {
-      position: 'absolute',
-      top: 4,
-      end: 4,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      paddingHorizontal: 6,
-      paddingVertical: 3,
-      borderRadius: 999,
-      maxWidth: 36,
-      overflow: 'hidden',
-    },
-    greenText: {
-      color: '#22C55E',
-    },
-    watchRow: {
-      marginTop: 10,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 6,
-    },
-    watchText: {
-      fontSize: 12,
-      color: '#7C3AED',
-      fontFamily: fontMedium,
-    },
-    dotsRow: {
-      flexDirection: 'row',
-      justifyContent: 'center',
-      gap: 6,
-      marginTop: 8,
-      marginBottom: 0,
-    },
-    dot: {
-      height: 8,
-      borderRadius: 4,
-    },
-    dotActive: {
-      width: 22,
-      backgroundColor: '#7C3AED',
-    },
-    dotInactive: {
-      width: 8,
-      backgroundColor: 'rgba(161, 161, 170, 0.3)',
-    },
-    promoteCard: {
-      borderRadius: 16,
-      paddingVertical: 12,
-      paddingHorizontal: 16,
-      backgroundColor: colors.card.background,
-      borderWidth: 1,
-      borderColor: '#E5E7EB',
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-    },
-    promoteText: {
-      fontSize: 14,
-      color: '#111827',
-      fontFamily: fontSemiBold,
-    },
-    promoteTextRTL: {
-      textAlign: 'right',
-      writingDirection: 'rtl',
-    },
-    promoteButton: {
-      paddingHorizontal: 14,
-      paddingVertical: 8,
-      borderRadius: 12,
-      backgroundColor: '#7C3AED',
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-    },
-    promoteButtonText: {
-      fontSize: 12,
-      color: colors.primary.foreground,
-      fontFamily: fontSemiBold,
-    },
-    rtlText: {
-      textAlign: 'right',
-    },
-  });
-};
-
-
-
-
-
+const createStyles = (colors: { foreground?: { DEFAULT?: string; muted?: string }; background?: { secondary?: string }; border?: { DEFAULT?: string } }, isDark: boolean) =>
+  StyleSheet.create({
+  section: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  emptyOrLoadingBox: {
+    minHeight: 180,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 24,
+    paddingHorizontal: 16,
+    backgroundColor: isDark ? '#27272A' : '#F4F4F5',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: isDark ? '#3F3F46' : '#E4E4E7',
+  },
+  emptyOrLoadingBoxDark: {
+    backgroundColor: '#27272A',
+    borderColor: '#3F3F46',
+  },
+  emptyOrLoadingText: {
+    fontSize: 14,
+    color: isDark ? '#A1A1AA' : '#52525B',
+    fontFamily: 'Rabar_021',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  sectionHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  sectionIcon: {
+    padding: 6,
+    backgroundColor: '#EDE9FE',
+    borderRadius: 8,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: isDark ? '#FAFAFA' : '#18181B',
+    fontFamily: 'Rabar_021',
+  },
+  sectionLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  sectionLinkText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#7C3AED',
+    fontFamily: 'Rabar_021',
+  },
+  outerCard: {
+    width: SCREEN_WIDTH - 40,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E4E4E7',
+    padding: 16,
+    overflow: 'visible',
+  },
+  mainRow: {
+    flexDirection: 'row',
+    gap: 16,
+  },
+  metricsGrid: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 8,
+    minWidth: 0,
+  },
+  metricCol: {
+    flex: 1,
+    alignItems: 'center',
+    padding: 10,
+    borderRadius: 12,
+    backgroundColor: '#F4F4F5',
+    minWidth: 0,
+  },
+  metricColDark: {
+    backgroundColor: 'rgba(63,63,70,0.5)',
+  },
+  metricLabel: {
+    fontSize: 9,
+    color: isDark ? '#FAFAFA' : '#52525B',
+    fontFamily: 'Rabar_021',
+    marginTop: 4,
+  },
+  metricValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: isDark ? '#FAFAFA' : '#18181B',
+    fontFamily: 'Poppins-Bold',
+    writingDirection: 'ltr',
+  },
+  metricCostValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#7C3AED',
+    fontFamily: 'Poppins-Bold',
+    writingDirection: 'ltr',
+  },
+  thumbWrap: {
+    width: 96,
+    height: 96,
+    position: 'relative',
+    borderRadius: 12,
+    overflow: 'visible',
+  },
+  thumb: {
+    width: 96,
+    height: 96,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#E4E4E7',
+  },
+  thumbDark: {
+    borderColor: '#3F3F46',
+  },
+  thumbPlaceholder: {
+    width: 96,
+    height: 96,
+    borderRadius: 12,
+    backgroundColor: '#F4F4F5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  thumbPlaceholderDark: {
+    backgroundColor: '#27272A',
+  },
+  rankBadge: {
+    position: 'absolute',
+    top: -8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  rankBadgeLTR: {
+    left: -6,
+  },
+  rankBadgeRTL: {
+    right: -6,
+    left: undefined,
+  },
+  rankBadgeText: {
+    fontSize: 12,
+    fontFamily: 'Poppins-Bold',
+  },
+  watchRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+    paddingVertical: 8,
+  },
+  watchText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#7C3AED',
+    fontFamily: 'Rabar_021',
+  },
+  dotsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 16,
+  },
+  dot: {
+    height: 8,
+    width: 8,
+    borderRadius: 4,
+  },
+  dotActive: {
+    width: 24,
+    height: 8,
+    backgroundColor: '#7C3AED',
+  },
+  dotInactive: {
+    width: 8,
+    height: 8,
+    backgroundColor: 'rgba(113,113,122,0.3)',
+  },
+  ctaCard: {
+    backgroundColor: isDark ? '#18181B' : (colors.background?.secondary ?? '#FFFFFF'),
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: isDark ? '#27272A' : (colors.border?.DEFAULT ?? '#E4E4E7'),
+    padding: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  ctaCardDark: {
+    backgroundColor: '#18181B',
+    borderColor: '#27272A',
+  },
+  ctaText: {
+    fontSize: 14,
+    color: isDark ? '#A1A1AA' : '#52525B',
+    fontFamily: 'Rabar_021',
+    fontWeight: '500',
+  },
+  ctaButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  ctaButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    fontFamily: 'Rabar_021',
+  },
+});
 

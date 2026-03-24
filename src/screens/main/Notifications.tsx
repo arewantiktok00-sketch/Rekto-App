@@ -1,24 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, StatusBar, Animated } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { View, StyleSheet, ScrollView, TouchableOpacity, Platform } from 'react-native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { supabase, supabaseRead } from '@/integrations/supabase/client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getGlobalCache, setNotificationsCache, getCached, setCached } from '@/services/globalCache';
-import {
-  Bell,
-  Check,
-  BellOff,
-  CheckCheck,
-  Gift,
-  CheckCircle,
-  AlertTriangle,
-  AlertCircle,
-  Info,
-  Megaphone,
-} from 'lucide-react-native';
+import { AlertCircle, AlertTriangle, BellOff, Check, CheckCheck, Info } from 'lucide-react-native';
 import { useTheme } from '@/contexts/ThemeContext';
 import { getFontFamily } from '@/utils/getFontFamily';
 import { ScreenHeader } from '@/components/common/ScreenHeader';
@@ -29,6 +18,10 @@ import { ExpiredOfferModal } from '@/components/common/ExpiredOfferModal';
 import { Text } from '@/components/common/Text';
 import { Swipeable } from 'react-native-gesture-handler';
 import { isRTL, rtlText, rtlRow } from '@/utils/rtl';
+import { getNotificationMessageForDisplay } from '@/utils/errorHandling';
+import { useOwnerAuth } from '@/hooks/useOwnerAuth';
+import { translateNotification } from '@/utils/notificationTranslator';
+import { toast } from '@/utils/toast';
 
 interface Notification {
   id: string;
@@ -43,10 +36,11 @@ interface Notification {
 const CACHE_KEY = 'notifications_cache';
 
 export function Notifications() {
-  const navigation = useNavigation();
+  const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { t, language } = useLanguage();
+  const { hasAdminAccess } = useOwnerAuth();
   const rtl = isRTL(language);
   const { colors, isDark } = useTheme();
 
@@ -58,9 +52,59 @@ export function Notifications() {
   const [notifications, setNotifications] = useState<Notification[]>(() =>
     getCached<Notification[]>('notifications', getGlobalCache().notifications || [])
   );
+  const initialLoadDone = useRef(false);
   const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showExpiredOffer, setShowExpiredOffer] = useState(false);
+
+  const getNotificationType = useCallback((type?: string): Notification['type'] | 'info' => {
+    if (type === 'success' || type === 'warning' || type === 'error' || type === 'info' || type === 'admin' || type === 'discount') {
+      return type;
+    }
+    return 'info';
+  }, []);
+
+  const getNotificationTone = useCallback((type?: string) => {
+    const normalizedType = getNotificationType(type);
+    switch (normalizedType) {
+      case 'success':
+        return {
+          accent: colors.success,
+          borderColor: `${colors.success}26`,
+          backgroundColor: `${colors.success}0D`,
+          unreadBackgroundColor: `${colors.success}14`,
+          messageColor: colors.success,
+          icon: <Check size={18} color={colors.success} strokeWidth={2.5} />,
+        };
+      case 'warning':
+        return {
+          accent: colors.warning,
+          borderColor: `${colors.warning}33`,
+          backgroundColor: `${colors.warning}12`,
+          unreadBackgroundColor: `${colors.warning}1A`,
+          messageColor: colors.warning,
+          icon: <AlertTriangle size={18} color={colors.warning} strokeWidth={2.2} />,
+        };
+      case 'error':
+        return {
+          accent: colors.error,
+          borderColor: `${colors.error}26`,
+          backgroundColor: `${colors.error}0D`,
+          unreadBackgroundColor: `${colors.error}14`,
+          messageColor: colors.error,
+          icon: <AlertCircle size={18} color={colors.error} strokeWidth={2.2} />,
+        };
+      default:
+        return {
+          accent: colors.info,
+          borderColor: `${colors.info}26`,
+          backgroundColor: `${colors.info}0D`,
+          unreadBackgroundColor: `${colors.info}14`,
+          messageColor: colors.foreground.muted,
+          icon: <Info size={18} color={colors.info} strokeWidth={2} />,
+        };
+    }
+  }, [colors, getNotificationType]);
 
   useEffect(() => {
     if (!user) return;
@@ -78,12 +122,36 @@ export function Notifications() {
     };
 
     loadCached();
-    fetchNotifications();
+    const doFetch = async () => {
+      await fetchNotifications();
+      initialLoadDone.current = true;
+    };
+    void doFetch();
   }, [user]);
 
+  useFocusEffect(
+    useCallback(() => {
+      if (!user || !initialLoadDone.current) return;
+      void fetchNotifications();
+    }, [user])
+  );
+
   useEffect(() => {
-    if (user) {
-      const channel = supabaseRead
+    if (!user) return;
+    let channel: ReturnType<typeof supabaseRead.channel> | null = null;
+    let retryTimeout: ReturnType<typeof setTimeout> | null = null;
+    let retryCount = 0;
+
+    const subscribe = () => {
+      if (retryTimeout) {
+        clearTimeout(retryTimeout);
+        retryTimeout = null;
+      }
+      if (channel) {
+        supabaseRead.removeChannel(channel);
+        channel = null;
+      }
+      channel = supabaseRead
         .channel(`user-notifications-${user.id}`)
         .on(
           'postgres_changes',
@@ -94,23 +162,59 @@ export function Notifications() {
             filter: `user_id=eq.${user.id}`,
           },
           (payload) => {
-            if (payload.eventType === 'INSERT' && payload.new) {
-              const updated = [payload.new as Notification, ...notifications];
-              const deduped = dedupeNotifications(updated);
-              setNotifications(deduped);
-              setNotificationsCache(deduped);
-              setCached('notifications', deduped);
+            const eventType = payload.eventType as 'INSERT' | 'UPDATE' | 'DELETE';
+            if (eventType === 'INSERT' && payload.new) {
+              const newNotif = payload.new as Notification;
+              setNotifications((prev) => {
+                if (prev.some((n) => n.id === newNotif.id)) return prev;
+                const updated = [newNotif, ...prev];
+                setNotificationsCache(updated);
+                setCached('notifications', updated);
+                return updated;
+              });
+              // Realtime INSERT = fresh; always show toast
+              const titleStr = (newNotif.title != null && String(newNotif.title)) || t('notificationTitleGeneric');
+              const msgStr = (newNotif.message != null && String(newNotif.message)) || t('notificationMessageGeneric');
+              const { title: translatedTitle, message: translatedMessage } = translateNotification(titleStr, msgStr, (language || 'en') as 'en' | 'ckb' | 'ar');
+              toast.info(translatedTitle || titleStr, translatedMessage || msgStr);
               return;
             }
-            fetchNotifications();
+            if (eventType === 'UPDATE' && payload.new) {
+              const updatedNotif = payload.new as Notification;
+              setNotifications((prev) => {
+                const next = prev.map((n) => (n.id === updatedNotif.id ? updatedNotif : n));
+                setNotificationsCache(next);
+                setCached('notifications', next);
+                return next;
+              });
+              return;
+            }
+            if (eventType === 'DELETE' && payload.old) {
+              const oldId = (payload.old as { id: string }).id;
+              setNotifications((prev) => {
+                const next = prev.filter((n) => n.id !== oldId);
+                setNotificationsCache(next);
+                setCached('notifications', next);
+                return next;
+              });
+            }
           }
         )
-        .subscribe();
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') retryCount = 0;
+          else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            const delay = Math.min(1000 * 2 ** retryCount, 15000);
+            retryCount += 1;
+            if (!retryTimeout) retryTimeout = setTimeout(subscribe, delay);
+          }
+        });
+    };
+    subscribe();
 
-      return () => {
-      supabaseRead.removeChannel(channel);
-      };
-    }
+    return () => {
+      if (retryTimeout) clearTimeout(retryTimeout);
+      if (channel) supabaseRead.removeChannel(channel);
+    };
   }, [user]);
 
   const dedupeNotifications = (items: Notification[]) => {
@@ -141,8 +245,7 @@ export function Notifications() {
         .from('notifications')
         .select('*')
         .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(50);
+        .order('created_at', { ascending: false });
 
       if (error) throw error;
       if (data) {
@@ -214,53 +317,56 @@ export function Notifications() {
     []
   );
 
-  const handleDismiss = useCallback(
-    async (id: string) => {
-      try {
-        await supabaseRead.from('notifications').delete().eq('id', id);
-      } catch (error) {
-        console.warn('[Notifications] Failed to delete notification:', error);
-      }
-      setNotifications((prev) => prev.filter((n) => n.id !== id));
-      setNotificationsCache(notifications.filter((n) => n.id !== id));
-    },
-    [notifications]
-  );
-
-  const getIconBackground = (type: string) => {
-    switch (type) {
-      case 'success':
-        return 'rgba(34, 197, 94, 0.2)';
-      case 'error':
-        return 'rgba(239, 68, 68, 0.2)';
-      case 'warning':
-        return 'rgba(234, 179, 8, 0.2)';
-      case 'admin':
-      case 'discount':
-        return 'rgba(168, 85, 247, 0.2)';
-      default:
-        return 'rgba(59, 130, 246, 0.2)';
+  const markAllAsRead = useCallback(async () => {
+    if (!user) return;
+    try {
+      await supabaseRead
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('user_id', user.id);
+      const updated = notifications.map((n) => ({ ...n, is_read: true }));
+      setNotifications(updated);
+      setNotificationsCache(updated);
+      setCached('notifications', updated);
+      await AsyncStorage.setItem(
+        `${CACHE_KEY}_${user.id}`,
+        JSON.stringify({ data: updated, timestamp: Date.now() })
+      );
+      const msg = language === 'ckb' ? 'هەموو ئاگادارییەکان وەک خوێندراوەتەوە' : language === 'ar' ? 'تم تعليم الكل كمقروء' : 'All marked as read';
+      toast.success(msg);
+    } catch (error) {
+      console.warn('[Notifications] Failed to mark all as read:', error);
+      toast.error(language === 'ckb' ? 'کێشە هەیە' : 'Something went wrong');
     }
-  };
+  }, [user, language, notifications]);
 
-  const PulseDot = () => {
-    const anim = useRef(new Animated.Value(0.6)).current;
-    useEffect(() => {
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(anim, { toValue: 1, duration: 700, useNativeDriver: true }),
-          Animated.timing(anim, { toValue: 0.6, duration: 700, useNativeDriver: true }),
-        ])
-      ).start();
-    }, [anim]);
-    return (
-      <Animated.View style={[styles.unreadDot, { opacity: anim, transform: [{ scale: anim }] }]} />
-    );
+  type SectionKey = 'today' | 'yesterday' | 'older';
+  const groupNotificationsByDate = (list: Notification[]): { key: SectionKey; label: string; data: Notification[] }[] => {
+    const today: Notification[] = [];
+    const yesterday: Notification[] = [];
+    const older: Notification[] = [];
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;
+    list.forEach((n) => {
+      const t = new Date(n.created_at).getTime();
+      if (t >= todayStart) today.push(n);
+      else if (t >= yesterdayStart) yesterday.push(n);
+      else older.push(n);
+    });
+    const sections: { key: SectionKey; label: string; data: Notification[] }[] = [];
+    const todayLabel = language === 'ckb' ? 'ئەمڕۆ' : 'اليوم';
+    const yesterdayLabel = language === 'ckb' ? 'دوێنێ' : 'أمس';
+    const olderLabel = language === 'ckb' ? 'پێشتر' : 'قديم';
+    if (today.length > 0) sections.push({ key: 'today', label: todayLabel, data: today });
+    if (yesterday.length > 0) sections.push({ key: 'yesterday', label: yesterdayLabel, data: yesterday });
+    if (older.length > 0) sections.push({ key: 'older', label: olderLabel, data: older });
+    return sections;
   };
 
   const renderRightActions = () => (
-    <View style={styles.deleteAction}>
-      <Text style={styles.deleteActionText}>{t('delete') || 'Delete'}</Text>
+    <View style={styles.markReadAction}>
+      <Text style={styles.markReadActionText}>{language === 'ckb' ? 'خوێندنەوە' : language === 'ar' ? 'تعليم كمقروء' : 'Mark read'}</Text>
     </View>
   );
 
@@ -304,135 +410,158 @@ export function Notifications() {
     return language === 'ckb' ? `${minutes} خولەک پێش` : `منذ ${minutes} دقيقة`;
   };
 
-  const markAsRead = async (id: string) => {
+  const markAsRead = useCallback(async (id: string) => {
+    const next = notifications.map((n) => (n.id === id ? { ...n, is_read: true } : n));
+    setNotifications(next);
+    setNotificationsCache(next);
+    setCached('notifications', next);
     try {
       await supabaseRead
         .from('notifications')
         .update({ is_read: true })
         .eq('id', id);
-      fetchNotifications();
     } catch (error) {
       console.error('Error marking as read:', error);
+      fetchNotifications();
     }
-  };
+  }, [notifications]);
 
-
-  const getNotificationColor = (type: string) => {
-    switch (type) {
-      case 'success':
-        return '#22C55E';
-      case 'error':
-        return '#EF4444';
-      case 'warning':
-        return '#EAB308';
-      case 'admin':
-      case 'discount':
-        return '#A855F7';
-      default:
-        return '#3B82F6';
-    }
-  };
-
-  const getIcon = (notification: Notification) => {
-    const msg = (notification.message && String(notification.message)) || '';
-    const title = (notification.title && String(notification.title)) || '';
-    const isDiscount =
-      notification.type === 'admin' ||
-      notification.type === 'discount' ||
-      title.toLowerCase().includes('discount') ||
-      msg.toLowerCase().includes('discount') ||
-      msg.toLowerCase().includes('خەسم') ||
-      msg.toLowerCase().includes('داشکان');
-
-    if (isDiscount) return <Gift size={20} color="#7C3AED" />;
-
-    switch (notification.type) {
-      case 'success':
-        return <CheckCircle size={20} color="#22C55E" />;
-      case 'warning':
-        return <AlertTriangle size={20} color="#EAB308" />;
-      case 'error':
-        return <AlertCircle size={20} color="#EF4444" />;
-      case 'admin':
-        return <Megaphone size={20} color="#A855F7" />;
-      default:
-        return <Info size={20} color="#3B82F6" />;
-    }
-  };
 
   const unreadCount = notifications.filter(n => !n.is_read).length;
 
   return (
     <View style={styles.container}>
       <ScreenHeader
-        title={unreadCount > 0 ? `${t('notifications') || 'Notifications'} (${unreadCount})` : (t('notifications') || 'Notifications')}
+        title={unreadCount > 0 ? `${t('notifications')} (${unreadCount})` : t('notifications')}
         onBack={() => navigation.goBack()}
         style={{ paddingTop: insets.top + 16 }}
+        rightElement={
+          hasAdminAccess && unreadCount > 0 ? (
+            <TouchableOpacity
+              onPress={markAllAsRead}
+              style={[styles.markAllReadButton, rtlRow(rtl)]}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityLabel={language === 'ckb' ? 'هەموو وەک خوێندراوەتەوە' : 'Mark all as read'}
+            >
+              <CheckCheck size={22} color={colors.foreground.DEFAULT} strokeWidth={2} />
+            </TouchableOpacity>
+          ) : undefined
+        }
       />
 
-      <ScrollView style={styles.content} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: Math.max(40, insets.bottom + spacing.xl) }}>
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={[
+          styles.contentContainer,
+          { paddingBottom: Math.max(40, insets.bottom + spacing.xl) },
+        ]}
+      >
         {notifications.length === 0 ? (
           <View style={styles.emptyState}>
             <BellOff size={48} color={colors.foreground.muted} />
-            <Text style={[styles.emptyText, isRTL && styles.textRTL]}>{t('noNotificationsYet') || 'No notifications yet'}</Text>
-            <Text style={[styles.emptySubtext, isRTL && styles.textRTL]}>
-              {t('noNotificationsDesc') || "You'll see updates about your campaigns here"}
+            <Text style={[styles.emptyText, rtl && styles.textRTL]}>{t('noNotificationsYet')}</Text>
+            <Text style={[styles.emptySubtext, rtl && styles.textRTL]}>
+              {t('noNotificationsDesc')}
             </Text>
           </View>
         ) : (
-          notifications.map((notification) => (
-            <Swipeable
-              key={notification.id}
-              renderRightActions={renderRightActions}
-              onSwipeableOpen={() => handleDismiss(notification.id)}
-            >
-              <TouchableOpacity
-                style={[
-                  styles.notificationCard,
-                  isRTL && styles.notificationCardRTL,
-                  !notification.is_read && (isRTL ? styles.notificationCardUnreadRTL : styles.notificationCardUnread),
-                ]}
-                onPress={() => handleNotificationPress(notification)}
-              >
-                <View
-                  style={[
-                    styles.iconContainer,
-                    { backgroundColor: getIconBackground(notification.type) },
-                  ]}
+          groupNotificationsByDate(notifications).map((section) => (
+            <View key={section.key} style={styles.section}>
+              <Text style={[styles.sectionHeader, rtl && styles.textRTL]}>{section.label}</Text>
+              {section.data.map((notification) => (
+                (() => {
+                  const tone = getNotificationTone(notification.type);
+                  return (
+                <Swipeable
+                  key={notification.id}
+                  renderRightActions={renderRightActions}
+                  onSwipeableOpen={() => !notification.is_read && markAsRead(notification.id)}
                 >
-                  {getIcon(notification)}
-                </View>
-                <View style={styles.notificationContent}>
-                  <View style={[styles.titleRow, isRTL && styles.rowReverse]}>
-                    <Text
-                      style={[
-                        styles.notificationTitle,
-                        !notification.is_read && styles.unreadTitle,
-                        isRTL && styles.textRTL,
-                      ]}
-                      numberOfLines={2}
-                    >
-                      {sanitizeNotificationText(
-                        notification.title,
-                        t('notificationTitleGeneric') || 'Notification'
-                      )}
-                    </Text>
-                    {!notification.is_read && <PulseDot />}
-                  </View>
-                  <Text style={[styles.notificationMessage, isRTL && styles.textRTL]} numberOfLines={2}>
-                    {sanitizeNotificationMessage(
-                      sanitizeNotificationText(
-                        notification.message,
-                        t('notificationMessageGeneric') || 'Tap to view details'
-                      )
+                  <TouchableOpacity
+                    style={[
+                      styles.notificationCard,
+                      {
+                        borderColor: tone.borderColor,
+                        backgroundColor: notification.is_read
+                          ? (isDark ? '#1E1E30' : '#F9FAFB')
+                          : tone.unreadBackgroundColor,
+                      },
+                    ]}
+                    onPress={() => handleNotificationPress(notification)}
+                    activeOpacity={0.7}
+                  >
+                    {!notification.is_read && (
+                      <View
+                        style={[
+                          styles.unreadAccentBar,
+                          { backgroundColor: tone.accent, opacity: 0.8 },
+                          rtl && styles.unreadAccentBarRTL,
+                        ]}
+                      />
                     )}
-                  </Text>
-                  <Text style={[styles.notificationDate, isRTL && styles.textRTL]}>
-                    {formatRelativeTime(new Date(notification.created_at))}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            </Swipeable>
+                    <View style={[styles.cardInner, rtl && styles.cardInnerRTL]}>
+                      <View style={styles.notificationContent}>
+                        <View style={[styles.titleRow, rtl && styles.titleRowRTL]}>
+                          {!notification.is_read && <View style={[styles.unreadDot, { backgroundColor: tone.accent }]} />}
+                          <Text
+                            style={[
+                              styles.notificationTitle,
+                              !notification.is_read && styles.unreadTitle,
+                              rtl && styles.textRTL,
+                            ]}
+                            numberOfLines={2}
+                          >
+                            {(translateNotification(
+                              sanitizeNotificationText(notification.title, t('notificationTitleGeneric')),
+                              sanitizeNotificationMessage(
+                                sanitizeNotificationText(notification.message, t('notificationMessageGeneric'))
+                              ),
+                              (language || 'ckb') as 'ckb' | 'ar' | 'en'
+                            ).title) || t('notificationTitleGeneric')}
+                          </Text>
+                        </View>
+                        <Text
+                          style={[
+                            styles.notificationMessage,
+                            { color: tone.messageColor },
+                            rtl && styles.textRTL,
+                          ]}
+                          numberOfLines={2}
+                        >
+                          {(() => {
+                            const rawMsg = sanitizeNotificationMessage(
+                              sanitizeNotificationText(notification.message, t('notificationMessageGeneric'))
+                            );
+                            const rawTitle = sanitizeNotificationText(notification.title, t('notificationTitleGeneric'));
+                            const tr = translateNotification(rawTitle, rawMsg, (language || 'ckb') as 'ckb' | 'ar' | 'en');
+                            return getNotificationMessageForDisplay(
+                              rawMsg,
+                              tr.message ?? '',
+                              !!hasAdminAccess,
+                              language === 'ar' ? 'ar' : 'ckb'
+                            );
+                          })()}
+                        </Text>
+                        <Text style={[styles.notificationDate, rtl && styles.textRTL]}>
+                          {formatRelativeTime(new Date(notification.created_at))}
+                        </Text>
+                      </View>
+                      <View
+                        style={[
+                          styles.statusIconWrap,
+                          { backgroundColor: `${tone.accent}14` },
+                          rtl && styles.statusIconWrapRTL,
+                        ]}
+                      >
+                        {tone.icon}
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                </Swipeable>
+                  );
+                })()
+              ))}
+            </View>
           ))
         )}
       </ScrollView>
@@ -450,7 +579,11 @@ export function Notifications() {
         }}
         onViewCampaign={(campaignId) => {
           setShowDetailModal(false);
-          navigation.navigate('CampaignDetail', { id: campaignId });
+          if (hasAdminAccess) {
+            navigation.navigate('OwnerDashboard' as never, { highlightCampaignId: campaignId } as never);
+          } else {
+            navigation.navigate('CampaignDetail' as never, { id: campaignId } as never);
+          }
         }}
         onCreateAd={() => {
           setShowDetailModal(false);
@@ -477,6 +610,15 @@ const createStyles = (
   container: {
     flex: 1,
     backgroundColor: colors.background.DEFAULT,
+  },
+  markAllReadButton: {
+    width: 40,
+    height: 40,
+    minWidth: 40,
+    minHeight: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerRTL: {
     flexDirection: 'row',
@@ -527,9 +669,6 @@ const createStyles = (
     fontWeight: '500',
     color: colors.foreground.DEFAULT,
   },
-  rowReverse: {
-    flexDirection: 'row',
-  },
   headerTitle: {
     alignItems: 'center',
   },
@@ -548,7 +687,10 @@ const createStyles = (
   },
   content: {
     flex: 1,
-    padding: spacing.md,
+  },
+  contentContainer: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
   },
   emptyState: {
     flex: 1,
@@ -569,52 +711,80 @@ const createStyles = (
     textAlign: 'center',
     marginTop: 8,
   },
-  notificationCard: {
-    flexDirection: 'row',
-    padding: spacing.md,
-    backgroundColor: colors.card.background,
-    borderRadius: 12,
-    gap: 12,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: colors.border.DEFAULT,
+  section: {
+    marginBottom: 24,
   },
-  notificationCardRTL: {
-    flexDirection: 'row',
+  sectionHeader: {
+    fontSize: 13,
+    fontFamily: fontFamilyMedium,
+    color: colors.foreground.muted,
+    marginBottom: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  notificationCard: {
+    position: 'relative',
+    backgroundColor: colors.card.background ?? (isDark ? '#27272A' : '#FFFFFF'),
+    borderRadius: 14,
+    marginBottom: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.06,
+        shadowRadius: 4,
+      },
+      android: { elevation: 2 },
+    }),
   },
   textRTL: {
     textAlign: 'right',
     writingDirection: 'rtl',
   },
-  notificationCardUnread: {
-    borderStartWidth: 4,
-    borderStartColor: colors.primary.DEFAULT,
-    backgroundColor: isDark ? 'rgba(124, 58, 237, 0.1)' : colors.primary.light + '20',
+  unreadAccentBar: {
+    position: 'absolute',
+    left: 0,
+    top: 12,
+    bottom: 12,
+    width: 2,
+    backgroundColor: colors.primary.DEFAULT,
+    opacity: 0.4,
+    borderTopRightRadius: 1,
+    borderBottomRightRadius: 1,
   },
-  notificationCardUnreadRTL: {
-    borderStartWidth: 0,
-    borderEndWidth: 4,
-    borderEndColor: colors.primary.DEFAULT,
-    backgroundColor: isDark ? 'rgba(124, 58, 237, 0.1)' : colors.primary.light + '20',
+  unreadAccentBarRTL: {
+    left: undefined,
+    right: 0,
+    borderTopRightRadius: 0,
+    borderBottomRightRadius: 0,
+    borderTopLeftRadius: 1,
+    borderBottomLeftRadius: 1,
   },
-  iconContainer: {
-    marginTop: 2,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+  cardInner: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  cardInnerRTL: {
+    flexDirection: 'row-reverse',
   },
   notificationContent: {
     flex: 1,
+    minWidth: 0,
   },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
+  },
+  titleRowRTL: {
+    flexDirection: 'row-reverse',
   },
   notificationTitle: {
-    fontSize: 14,
+    fontSize: 16,
     fontFamily: fontFamilyMedium,
     color: colors.foreground.DEFAULT,
     flex: 1,
@@ -623,18 +793,35 @@ const createStyles = (
     fontFamily: fontFamilySemiBold,
   },
   unreadDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#3B82F6',
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.primary.DEFAULT,
   },
-  deleteAction: {
+  statusIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 12,
+  },
+  statusIconWrapRTL: {
+    marginLeft: 0,
+    marginRight: 12,
+  },
+  markReadAction: {
     justifyContent: 'center',
     alignItems: 'flex-end',
-    backgroundColor: '#EF4444',
+    backgroundColor: colors.success ?? '#22C55E',
     paddingHorizontal: 20,
-    marginBottom: 8,
-    borderRadius: 12,
+    marginBottom: 12,
+    borderRadius: 14,
+  },
+  markReadActionText: {
+    color: '#fff',
+    fontFamily: fontFamilyBold,
+    fontWeight: '700',
   },
   notificationMessage: {
     fontSize: 14,
@@ -645,13 +832,8 @@ const createStyles = (
   notificationDate: {
     fontSize: 12,
     fontFamily: fontFamily,
-    color: '#71717A',
-    marginTop: 8,
-  },
-  deleteActionText: {
-    color: '#fff',
-    fontFamily: fontFamilyBold,
-    fontWeight: '700',
+    color: colors.foreground.muted,
+    marginTop: 6,
   },
 });
 

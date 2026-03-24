@@ -1,0 +1,23 @@
+diff --git a/node_modules/@react-native-community/slider/react-native-slider.podspec b/node_modules/@react-native-community/slider/react-native-slider.podspec
+index 54d77bd..581bcb1 100644
+--- a/node_modules/@react-native-community/slider/react-native-slider.podspec
++++ b/node_modules/@react-native-community/slider/react-native-slider.podspec
+@@ -18,7 +18,8 @@ Pod::Spec.new do |s|
+   s.source       = { :git => "https://github.com/callstack/react-native-slider.git", :tag => "v#{s.version}" }
+   s.source_files = "ios/**/*.{h,m,mm}"
+ 
+-  if new_arch_enabled
++  # Build Fabric (RNCSliderComponentView) even when app has New Arch off so RNCSlider view is registered
++  if new_arch_enabled || true
+     s.subspec "common" do |ss|
+         ss.source_files         = "common/cpp/**/*.{cpp,h}"
+         ss.pod_target_xcconfig  = { "HEADER_SEARCH_PATHS" => "\"$(PODS_TARGET_SRCROOT)/common/cpp\"" }
+@@ -31,7 +32,7 @@ Pod::Spec.new do |s|
+     s.dependency 'React-Core'
+ 
+     # This guard prevent to install the dependencies when we run `pod install` in the old architecture.
+-    if new_arch_enabled then
++    if new_arch_enabled || true then
+       s.compiler_flags = folly_compiler_flags + " -DRCT_NEW_ARCH_ENABLED=1"
+       s.pod_target_xcconfig    = {
+           "HEADER_SEARCH_PATHS" => "\"$(PODS_ROOT)/boost\"",

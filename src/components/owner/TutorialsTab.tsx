@@ -7,14 +7,16 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   TextInput,
-  Modal,
   Alert,
 } from 'react-native';
+import { CenterModal } from '@/components/common/CenterModal';
 import { Video, Plus, Edit2, Trash2, X, Play } from 'lucide-react-native';
 import { supabase } from '@/integrations/supabase/client';
 import { spacing, borderRadius } from '@/theme/spacing';
 import { toast } from '@/utils/toast';
 import { inputStyleRTL } from '@/utils/rtl';
+import { useLanguage } from '@/contexts/LanguageContext';
+import { translateErrorMessage } from '@/utils/errorTranslator';
 
 interface Tutorial {
   id: string;
@@ -52,6 +54,7 @@ interface TutorialsTabProps {
 }
 
 export const TutorialsTab: React.FC<TutorialsTabProps> = ({ colors, t }) => {
+  const { language } = useLanguage();
   const [loading, setLoading] = useState(true);
   const [tutorials, setTutorials] = useState<Tutorial[]>([]);
   const [signupTutorial, setSignupTutorial] = useState<SignupTutorialSettings>(defaultSignupTutorial);
@@ -129,7 +132,8 @@ export const TutorialsTab: React.FC<TutorialsTabProps> = ({ colors, t }) => {
       setTutorials(data?.tutorials || []);
     } catch (err: any) {
       console.error('Failed to fetch tutorials:', err);
-      toast.error('Error', 'Something went wrong');
+      const msg = err?.message || (err?.data?.error ? translateErrorMessage(String(err.data.error), (language || 'ckb') as 'ckb' | 'ar') : (language === 'ar' ? 'حدث خطأ. يرجى المحاولة مرة أخرى.' : 'هەڵەیەک ڕویدا. تکایە دووبارە هەوڵبدە.'));
+      toast.error(language === 'ckb' ? 'هەڵە' : 'خطأ', msg);
       setTutorials([]);
     } finally {
       setLoading(false);
@@ -193,10 +197,13 @@ export const TutorialsTab: React.FC<TutorialsTabProps> = ({ colors, t }) => {
                 toast.success('Success', 'Operation completed');
                 fetchTutorials();
               } else {
-                throw new Error(data?.error || 'Failed to delete tutorial');
+                const msg = translateErrorMessage(data?.error ?? '', (language || 'ckb') as 'ckb' | 'ar');
+                toast.error(language === 'ckb' ? 'هەڵە' : 'خطأ', msg);
+                return;
               }
             } catch (err: any) {
-              toast.error('Error', 'Something went wrong');
+              const msg = translateErrorMessage('', (language || 'ckb') as 'ckb' | 'ar');
+              toast.error(language === 'ckb' ? 'هەڵە' : 'خطأ', msg);
             }
           },
         },
@@ -205,13 +212,15 @@ export const TutorialsTab: React.FC<TutorialsTabProps> = ({ colors, t }) => {
   };
 
   const handleSave = async () => {
+    const genericError = language === 'ar' ? 'حدث خطأ. يرجى المحاولة مرة أخرى.' : 'هەڵەیەک ڕویدا. تکایە دووبارە هەوڵبدە.';
+    const errorTitle = language === 'ckb' ? 'هەڵە' : 'خطأ';
     if (!formData.title_en.trim() || !formData.video_url.trim()) {
-      toast.error('Error', 'Something went wrong');
+      toast.error(errorTitle, genericError);
       return;
     }
 
     if (!formData.description_en.trim()) {
-      toast.error('Error', 'Something went wrong');
+      toast.error(errorTitle, genericError);
       return;
     }
 
@@ -241,6 +250,11 @@ export const TutorialsTab: React.FC<TutorialsTabProps> = ({ colors, t }) => {
         });
 
         if (error) throw error;
+        if (data?.success === false) {
+          const msg = translateErrorMessage(data?.error ?? '', (language || 'ckb') as 'ckb' | 'ar');
+          toast.error(language === 'ckb' ? 'هەڵە' : 'خطأ', msg);
+          return;
+        }
 
         toast.success('Success', 'Operation completed');
       } else {
@@ -253,13 +267,19 @@ export const TutorialsTab: React.FC<TutorialsTabProps> = ({ colors, t }) => {
         });
 
         if (error) throw error;
+        if (data?.success === false) {
+          const msg = translateErrorMessage(data?.error ?? '', (language || 'ckb') as 'ckb' | 'ar');
+          toast.error(language === 'ckb' ? 'هەڵە' : 'خطأ', msg);
+          return;
+        }
 
         toast.success('Success', 'Operation completed');
       }
       setShowModal(false);
       fetchTutorials();
     } catch (err: any) {
-      toast.error('Error', 'Something went wrong');
+      const msg = err?.data?.error ? translateErrorMessage(String(err.data.error), (language || 'ckb') as 'ckb' | 'ar') : translateErrorMessage('', (language || 'ckb') as 'ckb' | 'ar');
+      toast.error(language === 'ckb' ? 'هەڵە' : 'خطأ', msg);
     }
   };
 
@@ -384,10 +404,9 @@ export const TutorialsTab: React.FC<TutorialsTabProps> = ({ colors, t }) => {
         )}
       </ScrollView>
 
-      {/* Add/Edit Modal */}
-      <Modal visible={showModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+      {/* Add/Edit Modal — centered, keyboard-aware */}
+      <CenterModal visible={showModal} onRequestClose={() => setShowModal(false)} keyboardAware>
+        <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
                 {editingTutorial ? 'Edit Tutorial' : 'Add Tutorial'}
@@ -496,8 +515,7 @@ export const TutorialsTab: React.FC<TutorialsTabProps> = ({ colors, t }) => {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
-      </Modal>
+      </CenterModal>
     </View>
   );
 };

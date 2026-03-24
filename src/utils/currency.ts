@@ -25,12 +25,57 @@ export function formatUSDEnglish(amount: number): string {
   }).format(amount);
 }
 
-export function formatIQD(amount: number, isRTL?: boolean): string {
-  const locale = isRTL ? arIQ : enUS;
-  const formatted = new Intl.NumberFormat(locale, {
+/**
+ * Profile "spent all time" and any place that must NEVER show Arabic-Indic digits (٢٦٩).
+ * Uses only ASCII 0-9 — no Intl (RTL/locale can still reshape numerals).
+ */
+/** Integer part only — ASCII 0-9 and commas only (no toLocaleString/Intl). */
+export function formatIntegerLatinDigitsOnly(amount: number): string {
+  const n = Math.floor(Math.abs(Number(amount)));
+  if (!Number.isFinite(n)) return '0';
+  const intStr = String(n);
+  let withCommas = '';
+  for (let i = 0; i < intStr.length; i++) {
+    if (i > 0 && (intStr.length - i) % 3 === 0) withCommas += ',';
+    withCommas += intStr[i];
+  }
+  return Number(amount) < 0 ? `-${withCommas}` : withCommas;
+}
+
+export function formatUSDLatinDigitsOnly(amount: number): string {
+  const n = Number(amount);
+  if (!Number.isFinite(n)) return '$0.00';
+  const negative = n < 0;
+  const abs = Math.abs(n);
+  const [intStr, decStr] = abs.toFixed(2).split('.');
+  let withCommas = '';
+  for (let i = 0; i < intStr.length; i++) {
+    if (i > 0 && (intStr.length - i) % 3 === 0) withCommas += ',';
+    withCommas += intStr[i];
+  }
+  const body = `$${withCommas}.${decStr}`;
+  return negative ? `-${body}` : body;
+}
+
+/** IQD display with Latin digits only — avoids Arabic-Indic numerals on RTL devices. */
+export function formatIQDLatinDigitsOnly(amountIqd: number): string {
+  return `IQD ${formatIntegerLatinDigitsOnly(amountIqd)}`;
+}
+
+/**
+ * Canonical balance display: "IQD 20,000" (Poppins/LTR for numbers).
+ * Use everywhere for wallet/balance screens. No USD.
+ */
+export function formatIQD(amount: number): string {
+  return `IQD ${Math.floor(amount).toLocaleString('en-US')}`;
+}
+
+/** Always show IQD with English numerals (0-9). Use for all amount displays in app. */
+export function formatIQDEnglish(amount: number): string {
+  const formatted = new Intl.NumberFormat('en-US', {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
-  }).format(amount);
+  }).format(Math.floor(amount));
   return `${formatted} IQD`;
 }
 

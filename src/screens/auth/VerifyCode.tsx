@@ -7,16 +7,18 @@ import { normalizePhoneToE164 } from '@/utils/phone';
 import { inputStyleRTL } from '@/utils/rtl';
 import { toast } from '@/utils/toast';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { LinearGradient } from 'expo-linear-gradient';
+import LinearGradient from 'react-native-linear-gradient';
 import React, { useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export function VerifyCode() {
   const navigation = useNavigation();
   const route = useRoute();
+  const insets = useSafeAreaInsets();
   const { t } = useLanguage();
   const { colors } = useTheme();
-  const styles = createStyles(colors);
+  const styles = createStyles(colors, insets);
   const [code, setCode] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
   const [cooldownSeconds, setCooldownSeconds] = useState(120);
@@ -98,7 +100,7 @@ export function VerifyCode() {
 
   const handleVerify = async (verificationCode: string) => {
     if (verificationCode.length !== 6) {
-      toast.warning('Invalid code', 'Please enter the 6-digit code');
+      toast.warning(t('error'), t('invalidCode'));
       return;
     }
 
@@ -116,7 +118,7 @@ export function VerifyCode() {
         if (error) throw error;
         if (data?.error) throw new Error(data.error);
 
-        toast.success('Verified', 'Email verified successfully');
+        toast.success(t('verifiedSuccess'), t('emailVerifiedSuccess'));
 
         navigation.navigate('Auth', { screen: 'Login' });
       } else {
@@ -156,17 +158,17 @@ export function VerifyCode() {
               refresh_token: signupData.session.refresh_token,
             });
 
-            toast.success('Signup successful', 'Your account is ready');
+            toast.success(t('signupSuccessful'), t('yourAccountIsReady'));
           }
         } else if (purpose === 'login') {
-          toast.success('Verified', 'Code verified successfully');
+          toast.success(t('verifiedSuccess'), t('codeSentSuccess'));
           navigation.navigate('Auth', {
             screen: 'PhoneLogin',
             params: { phoneNumber: normalizedPhone },
           });
         } else {
           // Just verification (for password reset flow)
-          toast.success('Verified', 'You can reset your password');
+          toast.success(t('verifiedSuccess'), t('youCanResetPassword'));
 
           // Navigate to reset password screen
           navigation.navigate('Auth', { 
@@ -184,10 +186,10 @@ export function VerifyCode() {
         error?.attemptsRemaining ??
         null;
       toast.error(
-        'Verification Failed',
+        t('verificationFailed'),
         attemptsRemaining !== null
-          ? `${error.message || 'Invalid code. Please try again.'} Attempts left: ${attemptsRemaining}`
-          : error.message || 'Invalid code. Please try again.'
+          ? `${error.message || t('invalidCodeTryAgain')} (${t('attemptsLeft') || 'Attempts left'}: ${attemptsRemaining})`
+          : error.message || t('invalidCodeTryAgain')
       );
       clearCode();
     } finally {
@@ -256,20 +258,20 @@ export function VerifyCode() {
                   body: { email },
                 });
                 if (response.error) {
-                  toast.warning('Please wait', 'Please wait a moment before requesting a new code.');
+                  toast.warning(t('pleaseWait'), t('pleaseWaitBeforeNewCode'));
                   return;
                 }
                 const data = response.data;
                 if (data?.error) {
                   const msg = (data.error as string).toLowerCase();
                   if (msg.includes('wait') || msg.includes('recent') || msg.includes('cooldown')) {
-                    toast.warning('Please wait', 'Please wait 2 minutes before requesting a new code.');
+                    toast.warning(t('pleaseWait'), t('pleaseWaitMinutes'));
                   } else {
-                    toast.error('Error', data.error as string);
+                    toast.error(t('error'), t('somethingWentWrong'));
                   }
                   return;
                 }
-                toast.success('Code sent', 'Verification code sent! Check your email.');
+                toast.success(t('codeSent'), t('codeSentSuccess'));
                 startCooldown(120);
               } else if (method === 'phone' && phoneNumber) {
                 const normalizedPhone = normalizePhoneToE164(phoneNumber);
@@ -277,29 +279,29 @@ export function VerifyCode() {
                   body: { phoneNumber: normalizedPhone, purpose: purpose || 'signup' },
                 });
                 if (response.error) {
-                  toast.warning('Please wait', 'Please wait a moment before requesting a new code.');
+                  toast.warning(t('pleaseWait'), t('pleaseWaitBeforeNewCode'));
                   return;
                 }
                 const data = response.data;
                 if (data?.error) {
                   const msg = (data.error as string).toLowerCase();
                   if (msg.includes('wait') || msg.includes('recent') || msg.includes('cooldown')) {
-                    toast.warning('Please wait', 'Please wait 2 minutes before requesting a new code.');
+                    toast.warning(t('pleaseWait'), t('pleaseWaitMinutes'));
                   } else {
-                    toast.error('Error', data.error as string);
+                    toast.error(t('error'), t('somethingWentWrong'));
                   }
                   return;
                 }
                 if (data?.hasValidToken && data?.cooldown) {
-                  toast.warning('Please wait', `Please wait ${Math.ceil((data.cooldown || 120) / 60)} minutes before requesting a new code.`);
+                  toast.warning(t('pleaseWait'), t('pleaseWaitMinutes'));
                   startCooldown(data.cooldown || 120);
                 } else {
-                  toast.success('Code sent', `Code sent via ${data?.method || 'WhatsApp'}`);
+                  toast.success(t('codeSent'), t('codeSentViaWhatsApp'));
                   startCooldown(120);
                 }
               }
             } catch {
-              toast.error('Error', 'Could not send code. Please check your connection and try again.');
+              toast.error(t('error'), t('couldNotSendCode'));
             }
           }}
           disabled={cooldownSeconds > 0}
@@ -313,7 +315,7 @@ export function VerifyCode() {
   );
 }
 
-const createStyles = (colors: any) => StyleSheet.create({
+const createStyles = (colors: any, insets: { top: number; bottom: number }) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background.DEFAULT,
@@ -321,7 +323,9 @@ const createStyles = (colors: any) => StyleSheet.create({
   content: {
     flex: 1,
     justifyContent: 'center',
-    padding: spacing.xl,
+    paddingHorizontal: spacing.screenPadding,
+    paddingTop: insets.top + spacing[6],
+    paddingBottom: insets.bottom + spacing[6],
   },
   title: {
     fontSize: 32,

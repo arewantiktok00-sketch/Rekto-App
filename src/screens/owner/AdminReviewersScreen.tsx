@@ -29,7 +29,7 @@ export function AdminReviewersScreen() {
   const insets = useSafeAreaInsets();
   const colors = getOwnerColors();
   const { user } = useAuth();
-  const { language } = useLanguage();
+  const { t, language } = useLanguage();
   const typography = getTypographyStyles(language as 'ckb' | 'ar');
   const styles = createStyles(colors, insets, typography);
 
@@ -46,12 +46,12 @@ export function AdminReviewersScreen() {
       });
 
       if (error || data?.error) {
-        toast.error('Error', 'Could not load reviewers. Please try again.');
+        toast.error(t('error'), t('couldNotLoadReviewers'));
         return;
       }
       setReviewers(data?.reviewers || []);
     } catch {
-      toast.error('Error', 'Could not load reviewers. Please try again.');
+      toast.error(t('error'), t('couldNotLoadReviewers'));
     } finally {
       setIsLoading(false);
       setRefreshing(false);
@@ -69,7 +69,7 @@ export function AdminReviewersScreen() {
 
   const addReviewer = async () => {
     if (!newEmail.trim() || !newEmail.includes('@')) {
-      toast.warning('Invalid email', 'Please enter a valid email address.');
+      toast.warning(t('invalidEmail'), t('pleaseEnterValidEmail'));
       return;
     }
 
@@ -85,24 +85,24 @@ export function AdminReviewersScreen() {
       });
 
       if (error || data?.error) {
-        toast.error('Error', (data?.error as string) || 'Failed to add reviewer. Please try again.');
+        toast.error(t('error'), t('failedToAddReviewer'));
         return;
       }
-      toast.success('Success', 'Reviewer added!');
+      toast.success(t('success'), t('reviewerAdded'));
       setNewEmail('');
       fetchReviewers();
     } catch {
-      toast.error('Error', 'Failed to add reviewer. Please try again.');
+      toast.error(t('error'), t('failedToAddReviewer'));
     } finally {
       setIsAdding(false);
     }
   };
 
   const removeReviewer = (reviewerId: string, email: string) => {
-    Alert.alert('Remove Reviewer', `Remove ${email}?`, [
-      { text: 'Cancel', style: 'cancel' },
+    Alert.alert(t('removeReviewer'), t('removeReviewerConfirm', { email }), [
+      { text: t('cancel'), style: 'cancel' },
       {
-        text: 'Remove',
+        text: t('delete'),
         style: 'destructive',
         onPress: async () => {
           try {
@@ -111,13 +111,13 @@ export function AdminReviewersScreen() {
             });
 
             if (error || data?.error) {
-              toast.error('Error', 'Could not remove reviewer. Please try again.');
+              toast.error(t('error'), t('couldNotRemoveReviewer'));
               return;
             }
-            toast.success('Success', 'Reviewer removed.');
+            toast.success(t('success'), t('reviewerRemoved'));
             fetchReviewers();
           } catch {
-            toast.error('Error', 'Could not remove reviewer. Please try again.');
+            toast.error(t('error'), t('couldNotRemoveReviewer'));
           }
         },
       },
@@ -126,11 +126,11 @@ export function AdminReviewersScreen() {
 
   const formatDate = (dateStr: string) => {
     try {
-      return new Date(dateStr).toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-      });
+      const date = new Date(dateStr);
+      const d = String(date.getDate()).padStart(2, '0');
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const y = date.getFullYear();
+      return `${d}/${m}/${y}`;
     } catch {
       return '—';
     }
@@ -140,8 +140,8 @@ export function AdminReviewersScreen() {
     <View style={styles.reviewerCard}>
       <View style={styles.reviewerMain}>
         <Text style={styles.reviewerEmail}>{item.email}</Text>
-        <Text style={styles.reviewerAddedBy}>Added by {item.added_by || '—'}</Text>
-        <Text style={styles.reviewerDate}>Added {formatDate(item.created_at)}</Text>
+        <Text style={styles.reviewerAddedBy}>{t('addedBy')} {item.added_by || '—'}</Text>
+        <Text style={styles.reviewerDate}>{t('addedOn', { date: formatDate(item.created_at) })}</Text>
       </View>
       <TouchableOpacity
         style={styles.removeButton}
@@ -159,22 +159,21 @@ export function AdminReviewersScreen() {
           <UserCheck size={22} color={colors.primary.foreground} />
         </View>
         <View style={styles.headerTextWrap}>
-          <Text style={styles.title}>Admin Reviewers</Text>
-          <Text style={styles.subtitle}>Limited access role</Text>
+          <Text style={styles.title}>{t('adminReviewersTitle')}</Text>
+          <Text style={styles.subtitle}>{t('limitedAccessRole')}</Text>
         </View>
       </View>
 
       <View style={styles.infoAlert}>
         <Text style={styles.infoAlertText}>
-          Admin Reviewers can ONLY access the Ad Review Queue to approve/reject ads and verify
-          payments. They do NOT have access to other dashboard features.
+          {t('adminReviewersInfo')}
         </Text>
       </View>
 
       <View style={styles.addSection}>
         <TextInput
           style={[styles.input, inputStyleRTL()]}
-          placeholder="admin@example.com"
+          placeholder={t('adminEmailPlaceholder')}
           placeholderTextColor="#9CA3AF"
           value={newEmail}
           onChangeText={setNewEmail}
@@ -191,16 +190,16 @@ export function AdminReviewersScreen() {
           ) : (
             <>
               <Plus size={18} color="#FFFFFF" />
-              <Text style={styles.addButtonText}>Add Reviewer</Text>
+              <Text style={styles.addButtonText}>{t('addReviewer')}</Text>
             </>
           )}
         </TouchableOpacity>
       </View>
 
       <View style={styles.listTitleRow}>
-        <Text style={styles.listTitle}>Current Reviewers ({reviewers.length})</Text>
+        <Text style={styles.listTitle}>{t('currentReviewers', { count: reviewers.length })}</Text>
         <View style={styles.reviewOnlyBadge}>
-          <Text style={styles.reviewOnlyBadgeText}>Review Access Only</Text>
+          <Text style={styles.reviewOnlyBadgeText}>{t('reviewAccessOnly')}</Text>
         </View>
       </View>
     </>
@@ -208,26 +207,26 @@ export function AdminReviewersScreen() {
 
   const permissionsCard = (
     <View style={styles.permissionsCard}>
-      <Text style={styles.permissionsCardTitle}>Permissions</Text>
+      <Text style={styles.permissionsCardTitle}>{t('permissionsLabel')}</Text>
       <View style={styles.permissionRow}>
         <Check size={16} color="#22C55E" />
-        <Text style={styles.permissionText}>View and manage Ad Review Queue</Text>
+        <Text style={styles.permissionText}>{t('viewManageAdReviewQueue')}</Text>
       </View>
       <View style={styles.permissionRow}>
         <Check size={16} color="#22C55E" />
-        <Text style={styles.permissionText}>Approve or reject ad content</Text>
+        <Text style={styles.permissionText}>{t('approveRejectAdContent')}</Text>
       </View>
       <View style={styles.permissionRow}>
         <Check size={16} color="#22C55E" />
-        <Text style={styles.permissionText}>Verify payment submissions</Text>
+        <Text style={styles.permissionText}>{t('verifyPaymentSubmissions')}</Text>
       </View>
       <View style={styles.permissionRow}>
         <X size={16} color="#EF4444" />
-        <Text style={styles.permissionText}>Cannot access App Control, User Management, or Settings</Text>
+        <Text style={styles.permissionText}>{t('cannotAccessAppControl')}</Text>
       </View>
       <View style={styles.permissionRow}>
         <X size={16} color="#EF4444" />
-        <Text style={styles.permissionText}>Cannot add or remove other admins</Text>
+        <Text style={styles.permissionText}>{t('cannotAddRemoveAdmins')}</Text>
       </View>
     </View>
   );
@@ -249,7 +248,7 @@ export function AdminReviewersScreen() {
         ListHeaderComponent={listHeader}
         ListEmptyComponent={
           <View style={styles.emptyWrap}>
-            <Text style={styles.emptyText}>No reviewers added yet</Text>
+            <Text style={styles.emptyText}>{t('noReviewersYet')}</Text>
           </View>
         }
         ListFooterComponent={permissionsCard}

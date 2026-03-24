@@ -3,8 +3,6 @@ import { supabase, supabaseRead } from '@/integrations/supabase/client';
 import { getTranslation, type LocaleKey } from '@/i18n/translations';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { I18nManager } from 'react-native';
-
 export type Language = LocaleKey; // 'ckb' | 'ar' — NO ENGLISH
 
 const STORAGE_KEY = 'rekto-language';
@@ -20,14 +18,13 @@ const LanguageContext = createContext<LanguageContextType | undefined>(undefined
 
 export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
-  const [language, setLanguageState] = useState<Language>('ckb');
+  const [language, setLanguageState] = useState<Language>('ar');
 
   const setLanguageInternal = useCallback(async (lang: Language, persistRemote: boolean) => {
     try {
       await AsyncStorage.setItem(STORAGE_KEY, lang);
       setLanguageState(lang);
-      I18nManager.forceRTL(true);
-      I18nManager.allowRTL(true);
+      // RTL is set once in index.js; no need to call I18nManager here
 
       if (persistRemote && user?.id) {
         const { error } = await supabase
@@ -44,16 +41,11 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [user?.id]);
 
   useEffect(() => {
-    I18nManager.forceRTL(true);
-    I18nManager.allowRTL(true);
-  }, []);
-
-  useEffect(() => {
     const initLanguage = async () => {
       try {
         const saved = await AsyncStorage.getItem(STORAGE_KEY);
-        if (saved === 'ar') {
-          await setLanguageInternal('ar', false);
+        if (saved === 'ar' || saved === 'ckb') {
+          await setLanguageInternal(saved, false);
         } else if (user?.id) {
           const { data, error } = await supabaseRead
             .from('profiles')
@@ -61,13 +53,13 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             .eq('user_id', user.id)
             .maybeSingle();
           const pref = data?.preferred_language;
-          if (!error && pref === 'ar') {
-            await setLanguageInternal('ar', false);
+          if (!error && (pref === 'ar' || pref === 'ckb')) {
+            await setLanguageInternal(pref, false);
           } else {
-            await setLanguageInternal('ckb', false);
+            await setLanguageInternal('ar', false);
           }
         } else {
-          await setLanguageInternal('ckb', false);
+          await setLanguageInternal('ar', false);
         }
       } catch (error) {
         console.error('Error reading language from AsyncStorage:', error);

@@ -1,18 +1,20 @@
 import React from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { LinearGradient } from 'expo-linear-gradient';
+import LinearGradient from 'react-native-linear-gradient';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { Mail } from 'lucide-react-native';
 import { useTheme } from '@/contexts/ThemeContext';
 import { spacing, borderRadius } from '@/theme/spacing';
 import { Text } from '@/components/common/Text';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export function VerifyEmail() {
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
   const { t } = useLanguage();
   const { colors } = useTheme();
-  const styles = createStyles(colors);
+  const styles = createStyles(colors, insets);
 
   return (
     <View style={styles.container}>
@@ -50,7 +52,7 @@ export function VerifyEmail() {
   );
 }
 
-const createStyles = (colors: any) => StyleSheet.create({
+const createStyles = (colors: any, insets: { top: number; bottom: number }) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background.DEFAULT,
@@ -59,7 +61,9 @@ const createStyles = (colors: any) => StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: spacing.xl,
+    paddingHorizontal: spacing.screenPadding,
+    paddingTop: insets.top + spacing[6],
+    paddingBottom: insets.bottom + spacing[6],
   },
   iconContainer: {
     width: 120,
