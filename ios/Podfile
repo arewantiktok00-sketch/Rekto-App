@@ -1,0 +1,111 @@
+# Pure React Native CLI - no Expo. Old Architecture; RNCSlider registered via app's RNCSliderViewManager.
+ENV['RCT_NEW_ARCH_ENABLED'] = '0'
+
+# Hermes: RN 0.81 defaults to Hermes. Building React-hermes from source on Xcode 16+ often fails
+# ("No member named 'thread' in namespace 'std'", folly::Expected, etc.). Force prebuilt only.
+ENV['RCT_BUILD_HERMES_FROM_SOURCE'] = '0'
+ENV['RCT_USE_PREBUILT_HERMES'] = '1'
+
+require File.join(File.dirname(`node --print "require.resolve('react-native/package.json')"`), "scripts/react_native_pods")
+
+platform :ios, '15.1'
+prepare_react_native_project!
+
+pre_install do |installer|
+  installer.pod_targets.each do |pod|
+    next unless pod.name == 'react-native-onesignal'
+
+    def pod.build_type
+      Pod::BuildType.static_library
+    end
+  end
+end
+
+target 'Rekto' do
+  config_command = ['node', '-e', "process.argv=['', '', 'config'];require('@react-native-community/cli').run()"]
+  config = use_native_modules!(config_command)
+  pod 'RNHTMLtoPDF', :path => '.'
+
+  # Hermes must stay enabled for RN 0.81 (JSC removed from core). Prebuilt only avoids C++ compile errors.
+  use_react_native!(
+    :path => config[:reactNativePath],
+    :hermes_enabled => true,
+    :app_path => "#{Pod::Config.instance.installation_root}/..",
+    :privacy_file_aggregation_enabled => true,
+  )
+
+post_install do |installer|
+  react_native_post_install(installer)
+
+  # Fix React-Hermes / HermesExecutorFactory C++ errors on Xcode 16+ (std::thread, folly::Expected)
+  cxx20_targets = %w[
+    React-hermes
+    React-RuntimeHermes
+    hermes-engine
+    React-cxxreact
+    React-jsiexecutor
+    RCT-Folly
+  ]
+  installer.pods_project.targets.each do |target|
+    if cxx20_targets.include?(target.name) || target.name.include?('hermes') || target.name.include?('Hermes')
+      target.build_configurations.each do |config|
+        config.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++20'
+        config.build_settings['CLANG_CXX_LIBRARY'] = 'libc++'
+      end
+    end
+  end
+
+  installer.pods_project.targets.each do |target|
+    next unless target.name == 'react-native-onesignal'
+
+    target.build_configurations.each do |config|
+      config.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
+    end
+  end
+
+  # Fix Hermes framework Info.plist for App Store validation (MinimumOSVersion required)
+  min_ios = '15.1'
+  # 1) Patch framework inside Pods (prebuilt or already-built)
+  installer.pods_project.targets.each do |target|
+    if target.name == 'hermes-engine'
+      framework_paths = [
+        "#{installer.sandbox.root}/hermes-engine/destroot/Library/Frameworks/ios/hermes.framework",
+        "#{installer.sandbox.root}/hermes-engine/destroot/Library/Frameworks/universal/hermes.xcframework/ios-arm64/hermes.framework",
+      ]
+      framework_paths.each do |path|
+        plist_path = File.join(path, 'Info.plist')
+        next unless File.file?(plist_path)
+        system("/usr/libexec/PlistBuddy -c \"Set :MinimumOSVersion #{min_ios}\" \"#{plist_path}\" 2>/dev/null") ||
+          system("/usr/libexec/PlistBuddy -c \"Add :MinimumOSVersion string #{min_ios}\" \"#{plist_path}\" 2>/dev/null")
+      end
+      break
+    end
+  end
+
+  # 2) Add Run Script phase to app target to fix hermes.framework in built product (covers source-built Hermes)
+  begin
+    require 'xcodeproj'
+    project_path = File.join(File.dirname(__FILE__), 'Rekto.xcodeproj')
+    project = Xcodeproj::Project.open(project_path)
+    project.native_targets.each do |target|
+      next unless target.name == 'Rekto'
+      existing = target.shell_script_build_phases.find { |p| p.name == 'Fix Hermes MinimumOSVersion' }
+      next if existing
+      phase = target.new_shell_script_build_phase('Fix Hermes MinimumOSVersion')
+      phase.shell_script = <<~SCRIPT
+        PLIST="${BUILT_PRODUCTS_DIR}/${FRAMEWORKS_FOLDER_PATH}/hermes.framework/Info.plist"
+        if [ -f "$PLIST" ]; then
+          /usr/libexec/PlistBuddy -c "Set :MinimumOSVersion #{min_ios}" "$PLIST" 2>/dev/null ||
+          /usr/libexec/PlistBuddy -c "Add :MinimumOSVersion string #{min_ios}" "$PLIST" 2>/dev/null
+        fi
+      SCRIPT
+      target.build_phases << phase
+      project.save
+      break
+    end
+  rescue LoadError, StandardError => e
+    Pod::UI.warn "[Rekto] Could not add Fix Hermes phase: #{e.message}"
+  end
+end
+
+end
