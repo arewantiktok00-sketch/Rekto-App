@@ -500,6 +500,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = Rekto/Rekto.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8J4F6N7C3C;
 				ENABLE_BITCODE = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
@@ -518,7 +519,7 @@
 					"-lc++",
 				);
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
-				PRODUCT_BUNDLE_IDENTIFIER = com.Arewan.RektoApp;
+				PRODUCT_BUNDLE_IDENTIFIER = com.arewan.rekto.app;
 				PRODUCT_NAME = Rekto;
 				SWIFT_OBJC_BRIDGING_HEADER = "Rekto/Rekto-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -536,6 +537,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = Rekto/Rekto.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8J4F6N7C3C;
 				INFOPLIST_FILE = Rekto/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -549,7 +551,7 @@
 					"-lc++",
 				);
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
-				PRODUCT_BUNDLE_IDENTIFIER = com.Arewan.RektoApp;
+				PRODUCT_BUNDLE_IDENTIFIER = com.arewan.rekto.app;
 				PRODUCT_NAME = Rekto;
 				SWIFT_OBJC_BRIDGING_HEADER = "Rekto/Rekto-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
@@ -693,8 +695,10 @@
 				CODE_SIGN_ENTITLEMENTS = RektoWidgetExtension/RektoWidgetExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8J4F6N7C3C;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = RektoWidgetExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "ویجێتی رێکتۆ";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -702,7 +706,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.Arewan.RektoApp.RektoWidgetExtension;
+				PRODUCT_BUNDLE_IDENTIFIER = com.arewan.rekto.app.rektowidgetextensions;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -717,8 +721,10 @@
 				CODE_SIGN_ENTITLEMENTS = RektoWidgetExtension/RektoWidgetExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8J4F6N7C3C;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = RektoWidgetExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "ویجێتی رێکتۆ";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -726,7 +732,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.Arewan.RektoApp.RektoWidgetExtension;
+				PRODUCT_BUNDLE_IDENTIFIER = com.arewan.rekto.app.rektowidgetextensions;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;

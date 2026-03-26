@@ -47,6 +47,8 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Rekto uses the camera to capture photos and videos for your ads.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>We use your location to show nearby services and improve your experience.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Rekto uses the microphone to record audio for your video ads.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
