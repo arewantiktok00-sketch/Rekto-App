@@ -3,7 +3,7 @@ test
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 
-## Known issue: iOS reload crash
+## Known issue: iOS reload crashs
 
 Pressing **Reload** (e.g. Cmd+R in simulator) can crash the app with SIGABRT due to react-native-reanimated’s native worklets during bridge teardown. **Workaround:** fully close the app and launch it again instead of using in-app reload.
 
