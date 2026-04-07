@@ -3,16 +3,14 @@ import { Text } from '@/components/common/Text';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { supabase, supabaseRead } from '@/integrations/supabase/client';
+import { supabaseRead } from '@/integrations/supabase/client';
 import { borderRadius, spacing } from '@/theme/spacing';
 import { getFontFamily, getTypographyStyles } from '@/theme/typography';
-import { isRTL, rtlRow, rtlText } from '@/utils/rtl';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { isRTL, rtlText } from '@/utils/rtl';
 import { useNavigation } from '@react-navigation/native';
-import { useQueryClient } from '@tanstack/react-query';
-import { Lock, LogOut, Shield, Trash2 } from 'lucide-react-native';
+import { Lock, LogOut, Shield } from 'lucide-react-native';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export function PrivacySecurity() {
@@ -25,9 +23,7 @@ export function PrivacySecurity() {
   const typography = getTypographyStyles(language as 'ckb' | 'ar');
   const fontFamily = getFontFamily(language as 'ckb' | 'ar');
   const styles = createStyles(colors, insets, typography, fontFamily, rtl);
-  const queryClient = useQueryClient();
   const [resolvedEmail, setResolvedEmail] = useState('');
-  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const isPhoneBasedEmail = (emailStr: string): boolean => {
     return emailStr?.endsWith('@rekto.phone') || emailStr?.startsWith('phone_');
@@ -81,58 +77,6 @@ export function PrivacySecurity() {
         },
       ]
     );
-  };
-
-  const handleDeleteAccount = () => {
-    Alert.alert(
-      'Delete Account?',
-      'Are you sure about this decision? This will permanently delete:\n\n• All your campaigns and advertisements\n• Your transaction and payment history\n• Any remaining wallet balance\n• Your profile and all personal data',
-      [
-        { text: 'No, Keep My Account', style: 'cancel' },
-        {
-          text: 'Yes, I Want to Delete',
-          style: 'destructive',
-          onPress: () => {
-            Alert.alert(
-              'Final Warning',
-              "This decision cannot be reversed.\n\nOnce you delete your account, neither you, our support team, nor the company can recover your data. This is permanent due to our privacy policy.\n\nAll your data will be erased forever.",
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Delete My Account Permanently',
-                  style: 'destructive',
-                  onPress: handleDeleteAccountApi,
-                },
-              ]
-            );
-          },
-        },
-      ]
-    );
-  };
-
-  const handleDeleteAccountApi = async () => {
-    setDeleteLoading(true);
-    try {
-      const { data, error } = await supabase.functions.invoke('delete-account');
-      if (error) throw error;
-
-      if (data.success) {
-        await supabase.auth.signOut();
-        await AsyncStorage.clear();
-        queryClient.clear();
-        navigation.reset({
-          index: 0,
-          routes: [{ name: 'Auth' as never }],
-        });
-      } else {
-        Alert.alert('Error', 'Failed to delete account. Please try again.');
-      }
-    } catch (err: any) {
-      Alert.alert('Error', 'Failed to delete account. Please try again.');
-    } finally {
-      setDeleteLoading(false);
-    }
   };
 
   return (
@@ -203,27 +147,6 @@ export function PrivacySecurity() {
         </View>
         </TouchableOpacity>
 
-        {/* DANGER ZONE */}
-        <Text style={[styles.sectionLabel, styles.dangerLabel, rtlText(rtl)]}>
-          {t('dangerZone') || 'DANGER ZONE'}
-        </Text>
-        <TouchableOpacity
-          style={[styles.deleteAccountButton, rtlRow(rtl), deleteLoading && styles.deleteAccountButtonDisabled]}
-          activeOpacity={0.85}
-          onPress={handleDeleteAccount}
-          disabled={deleteLoading}
-        >
-          {deleteLoading ? (
-            <ActivityIndicator size="small" color={colors.primary.foreground} />
-          ) : (
-            <>
-              <Trash2 size={18} color={colors.primary.foreground} />
-              <Text style={[styles.deleteAccountText, rtlText(rtl)]}>
-                {t('deleteAccount')}
-              </Text>
-            </>
-          )}
-        </TouchableOpacity>
         </View>
       </ScrollView>
 
@@ -368,29 +291,6 @@ const createStyles = (colors: any, insets: any, typography: any, fontFamily: str
     ...typography.caption,
     fontSize: 12,
     color: colors.foreground.muted,
-  },
-  dangerLabel: {
-    color: '#EF4444',
-  },
-  deleteAccountButton: {
-    backgroundColor: colors.error,
-    borderRadius: borderRadius.card,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    marginTop: spacing.sm,
-  },
-  deleteAccountText: {
-    ...typography.body,
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.primary.foreground,
-  },
-  deleteAccountButtonDisabled: {
-    opacity: 0.7,
   },
   deleteModalContent: {
     backgroundColor: colors.card.background,

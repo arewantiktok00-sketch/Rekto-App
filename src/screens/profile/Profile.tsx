@@ -10,7 +10,7 @@ import { useRemoteConfig } from '@/contexts/RemoteConfigContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useOwnerAuth } from '@/hooks/useOwnerAuth';
 import { usePricingConfig } from '@/hooks/usePricingConfig';
-import { supabaseRead } from '@/integrations/supabase/client';
+import { supabase, supabaseRead } from '@/integrations/supabase/client';
 import { getCached, setCached } from '@/services/globalCache';
 import { borderRadius, spacing } from '@/theme/spacing';
 import { getTypographyStyles } from '@/theme/typography';
@@ -21,6 +21,7 @@ import { formatPhoneForDisplay, isPhoneBasedEmail } from '@/utils/phone';
 import { requestReview } from '@/utils/widgetBridge';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
   CheckCircle,
@@ -33,11 +34,12 @@ import {
   Pencil,
   Shield,
   Star,
+  Trash2,
   User,
   Wallet
 } from 'lucide-react-native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Animated, InteractionManager, Linking, Modal, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, InteractionManager, Linking, Modal, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -72,12 +74,14 @@ export function Profile() {
   const [totalSpendFromCompleted, setTotalSpendFromCompleted] = useState(0);
   const [loading, setLoading] = useState(!cachedProfile);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [showComingSoon, setShowComingSoon] = useState(false);
   const [comingSoonMessage, setComingSoonMessage] = useState('');
   const [showBalanceModal, setShowBalanceModal] = useState(false);
   const balanceModalAnim = useRef(new Animated.Value(0)).current;
   const lastFetchRef = useRef(0);
   const MIN_FETCH_INTERVAL = 2000;
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     let isMounted = true;
@@ -213,6 +217,62 @@ export function Profile() {
       .finally(() => {
         setLoggingOut(false);
       });
+  };
+
+  const handleDeleteAccount = () => {
+    const confirmationTitle =
+      language === 'ar'
+        ? 'حذف الحساب'
+        : language === 'ckb'
+          ? 'سڕینەوەی هەژمار'
+          : 'Delete Account';
+
+    const confirmationMessage =
+      language === 'ar'
+        ? 'هل أنت متأكد أنك تريد حذف حسابك؟\nهذا الإجراء نهائي ولا يمكن التراجع عنه.'
+        : language === 'ckb'
+          ? 'دڵنیایت لە سڕینەوەی هەژمارت؟\nئەم کردارە هەمیشەییە و ناگەڕێتەوە.'
+          : 'Are you sure you want to delete your account?\nThis action is permanent and cannot be undone.';
+
+    const cancelLabel = language === 'ar' ? 'إلغاء' : language === 'ckb' ? 'هەڵوەشاندنەوە' : 'Cancel';
+    const confirmLabel = language === 'ar' ? 'حذف الحساب' : language === 'ckb' ? 'سڕینەوەی هەژمار' : 'Delete Account';
+
+    Alert.alert(
+      confirmationTitle,
+      confirmationMessage,
+      [
+        { text: cancelLabel, style: 'cancel' },
+        {
+          text: confirmLabel,
+          style: 'destructive',
+          onPress: handleDeleteAccountApi,
+        },
+      ]
+    );
+  };
+
+  const handleDeleteAccountApi = async () => {
+    setDeleteLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('delete-account');
+      if (error) throw error;
+
+      if (data.success) {
+        await supabase.auth.signOut();
+        await AsyncStorage.clear();
+        queryClient.clear();
+        navigation.reset({
+          index: 0,
+          routes: [{ name: 'Auth' as never }],
+        });
+      } else {
+        Alert.alert('Error', 'Failed to delete account. Please try again.');
+      }
+    } catch (err: any) {
+      Alert.alert('Error', 'Failed to delete account. Please try again.');
+    } finally {
+      setDeleteLoading(false);
+    }
   };
 
   const handleGoBack = () => {
@@ -572,6 +632,22 @@ export function Profile() {
             <Text style={styles.logoutText}>
               {loggingOut ? t('loggingOut') : t('logout')}
             </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.deleteAccountButton, deleteLoading && styles.deleteAccountButtonDisabled]}
+            onPress={handleDeleteAccount}
+            activeOpacity={0.75}
+            disabled={deleteLoading}
+          >
+            {deleteLoading ? (
+              <ActivityIndicator size="small" color={colors.primary.foreground} />
+            ) : (
+              <>
+                <Trash2 size={18} color={colors.primary.foreground} />
+                <Text style={styles.deleteAccountText}>{t('deleteAccount')}</Text>
+              </>
+            )}
           </TouchableOpacity>
 
           {/* App Version */}
@@ -1464,5 +1540,29 @@ const createStyles = (colors: any, typography: any, fontFamily: string, isRTL: b
     fontFamily: fontFamily,
     textAlign: 'center',
     writingDirection: 'rtl',
+  },
+  deleteAccountButton: {
+    marginTop: spacing.xl + spacing.md,
+    alignSelf: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 16,
+    backgroundColor: colors.error,
+    minWidth: 220,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  deleteAccountText: {
+    ...typography.body,
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.primary.foreground,
+    textAlign: 'center',
+    writingDirection: 'rtl',
+  },
+  deleteAccountButtonDisabled: {
+    opacity: 0.7,
   },
 });
